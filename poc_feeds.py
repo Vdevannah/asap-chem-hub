@@ -99,42 +99,8 @@ JOURNALS = [
     ("ChemRxiv",                        "ChemRxiv",        CHEMRXIV),
 ]
 
-# ---------------------------------------------------------------------------
-# 2. Topic dictionary.  One article can match several topics - this is the
-#    "journal category vs scientific topic" separation (many-to-many).
-#    Extend the synonym lists as you see real articles.
-# ---------------------------------------------------------------------------
-TOPICS = {
-    "PROTAC / degraders": [
-        r"\bPROTACs?\b", r"proteolysis[- ]targeting chimeras?",
-        r"\b(protein )?degraders?\b", r"targeted protein degradation",
-        r"molecular glues?", r"\bE3 (ubiquitin )?ligase",
-    ],
-    "Covalent inhibitors": [
-        r"\bcovalent (inhibitor|ligand|drug|binder|modifier)s?\b",
-        r"\btargeted covalent\b",
-        r"\b(acrylamide|electrophilic) warheads?\b",
-    ],
-    "Kinase inhibitors": [
-        r"\bkinase inhibitors?\b",
-        r"\b(JAK[1-3]?|BTK|EGFR|CDK\d+|ALK|BRAF|PI3K)\b",
-    ],
-    "ADCs": [r"\bantibody[- ]drug conjugates?\b", r"\bADCs?\b"],
-    "Photoredox catalysis": [
-        r"photoredox", r"metallaphotoredox",
-        r"visible[- ]light[- ](mediated|promoted|induced)",
-    ],
-    "Photocatalysis (materials/energy)": [
-        r"photocataly\w*.{0,80}\b(CO2|CO₂|H2|hydrogen evolution|water splitting|semiconductor|COFs?|MOFs?)\b",
-    ],
-    "C–H functionalization": [
-        r"C[–—-]H (bond )?(functionali[sz]ation|activation|arylation|alkylation|amination|oxidation)",
-    ],
-}
-TOPIC_PATTERNS = {
-    topic: [re.compile(p, re.IGNORECASE) for p in pats]
-    for topic, pats in TOPICS.items()
-}
+# 2. Topic rules live in topics.py (shared with tune_topics.py and, later, the app)
+from topics import TOPICS, tag_topics
 
 HEADERS = {
     "User-Agent": "ASAPChemHub-PoC/0.1 (academic literature feed prototype)",
@@ -212,13 +178,6 @@ def find_date(entry) -> str:
     return entry.get("prism_publicationdate", "") or entry.get("dc_date", "")
 
 
-def tag_topics(text: str) -> list:
-    return [
-        topic for topic, pats in TOPIC_PATTERNS.items()
-        if any(p.search(text) for p in pats)
-    ]
-
-
 def crossref_fill(article: dict, session: requests.Session) -> None:
     """Fill missing authors/date from Crossref (metadata only)."""
     if not article["doi"] or (article["authors"] and article["date"] and len(article["abstract"]) > 100):
@@ -242,7 +201,7 @@ def crossref_fill(article: dict, session: requests.Session) -> None:
             article["date"] = "-".join(f"{p:02d}" for p in parts)
         if len(article["abstract"]) <= 100 and msg.get("abstract"):
             article["abstract"] = strip_html(msg["abstract"])
-            article["topics"] = tag_topics(f"{article['title']} {article['abstract']}")
+            article["topics"] = tag_topics(article['title'], article['abstract'])
         article["source_note"] += " +crossref"
     except (requests.RequestException, ValueError, KeyError):
         pass
@@ -305,7 +264,7 @@ def fetch_chemrxiv(name, publisher, url, session):
             "doi": it.get("DOI", ""),
             "link": f"https://doi.org/{it.get('DOI', '')}",
             "image_url": "", "abstract": abstract,
-            "topics": tag_topics(f"{title} {abstract}"),
+            "topics": tag_topics(title, abstract),
             "source_note": "crossref",
         })
     return articles, None, sorted({it.get("subtype", "") or it.get("type", "") for it in items} - {""})
@@ -316,8 +275,17 @@ NON_RESEARCH = re.compile(r"\b(news|editorial|career|correction|retraction|errat
                           r"working life|in other journals|this week)\b", re.IGNORECASE)
 
 
+NOT_A_PAPER = re.compile(r"^\s*(author correction|publisher correction|correction|corrigendum|"
+                         r"retraction|retracted|erratum|addendum|expression of concern|"
+                         r"(inside |outside )?(front|back) cover|cover picture|cover feature|"
+                         r"frontispiece|table of contents|masthead|issue information)\b",
+                         re.IGNORECASE)
+
+
 def is_research(name, e) -> bool:
-    """Keep only research papers from Nature and Science full feeds."""
+    """Drop corrections, covers etc. everywhere; keep only research from Nature/Science."""
+    if NOT_A_PAPER.search(strip_html(e.get("title", ""))):
+        return False
     if name == "Nature":
         # Nature research papers have DOIs s41586-...; news and comment are d41586-...
         return "/articles/s41586" in str(e.get("link", ""))
@@ -372,7 +340,7 @@ def fetch_journal(name, publisher, url, session):
             "link": e.get("link", ""),
             "image_url": find_image(e, url),
             "abstract": abstract,
-            "topics": tag_topics(f"{title} {abstract}"),
+            "topics": tag_topics(title, abstract),
             "source_note": "feed",
         })
     if name == "Science (latest issue)" and articles:
