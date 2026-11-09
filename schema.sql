@@ -23,7 +23,7 @@ CREATE TABLE journals (
     name             VARCHAR(100) NOT NULL UNIQUE,     -- 'J. Med. Chem.'
     publisher        VARCHAR(50)  NOT NULL,            -- 'ACS', 'Wiley', 'RSC', 'Springer Nature', 'AAAS', 'ChemRxiv'
     picker_group     VARCHAR(50)  NOT NULL,            -- group in the journal picker
-    source_type      VARCHAR(30)  NOT NULL DEFAULT 'rss',  -- 'rss' or 'chemrxiv_crossref'
+    source_type      VARCHAR(30)  NOT NULL DEFAULT 'rss',  -- 'rss', 'crossref' or 'chemrxiv_crossref'
     feed_url         VARCHAR(500) NOT NULL,
     default_on       BOOLEAN      NOT NULL DEFAULT TRUE,   -- switched on for new visitors
     is_active        BOOLEAN      NOT NULL DEFAULT TRUE,   -- FALSE = stop fetching, keep history
@@ -165,14 +165,14 @@ INSERT INTO journals (name, publisher, picker_group, source_type, feed_url, defa
 ('ChemMedChem', 'Wiley', 'Medicinal and chemical biology', 'rss', 'https://onlinelibrary.wiley.com/action/showFeed?jc=18607187&type=etoc&feed=rss', 1),
 ('ChemBioChem', 'Wiley', 'Medicinal and chemical biology', 'rss', 'https://onlinelibrary.wiley.com/action/showFeed?jc=14397633&type=etoc&feed=rss', 1),
 ('ChemCatChem', 'Wiley', 'Catalysis and inorganic', 'rss', 'https://onlinelibrary.wiley.com/action/showFeed?jc=18673899&type=etoc&feed=rss', 1),
-('Chemical Science', 'RSC', 'General and flagship', 'rss', 'http://feeds.rsc.org/rss/sc', 1),
-('Chem. Commun.', 'RSC', 'General and flagship', 'rss', 'http://feeds.rsc.org/rss/cc', 1),
-('Org. Biomol. Chem.', 'RSC', 'Organic and synthesis', 'rss', 'http://feeds.rsc.org/rss/ob', 1),
-('Org. Chem. Front.', 'RSC', 'Organic and synthesis', 'rss', 'http://feeds.rsc.org/rss/qo', 1),
-('RSC Med. Chem.', 'RSC', 'Medicinal and chemical biology', 'rss', 'http://feeds.rsc.org/rss/md', 1),
-('RSC Chem. Biol.', 'RSC', 'Medicinal and chemical biology', 'rss', 'http://feeds.rsc.org/rss/cb', 1),
-('Chem. Soc. Rev.', 'RSC', 'Reviews', 'rss', 'http://feeds.rsc.org/rss/cs', 1),
-('Nat. Prod. Rep.', 'RSC', 'Reviews', 'rss', 'http://feeds.rsc.org/rss/np', 1),
+('Chemical Science', 'RSC', 'General and flagship', 'crossref', 'crossref:issn:2041-6539', 1),
+('Chem. Commun.', 'RSC', 'General and flagship', 'crossref', 'crossref:issn:1364-548X', 1),
+('Org. Biomol. Chem.', 'RSC', 'Organic and synthesis', 'crossref', 'crossref:issn:1477-0539', 1),
+('Org. Chem. Front.', 'RSC', 'Organic and synthesis', 'crossref', 'crossref:issn:2052-4129', 1),
+('RSC Med. Chem.', 'RSC', 'Medicinal and chemical biology', 'crossref', 'crossref:issn:2632-8682', 1),
+('RSC Chem. Biol.', 'RSC', 'Medicinal and chemical biology', 'crossref', 'crossref:issn:2633-0679', 1),
+('Chem. Soc. Rev.', 'RSC', 'Reviews', 'crossref', 'crossref:issn:1460-4744', 1),
+('Nat. Prod. Rep.', 'RSC', 'Reviews', 'crossref', 'crossref:issn:1460-4752', 1),
 ('Nature', 'Springer Nature', 'General and flagship', 'rss', 'https://www.nature.com/nature.rss', 1),
 ('Nat. Commun. (chemistry)', 'Springer Nature', 'General and flagship', 'rss', 'https://www.nature.com/subjects/chemistry/ncomms.rss', 1),
 ('Nature Chemistry', 'Springer Nature', 'General and flagship', 'rss', 'https://www.nature.com/nchem.rss', 1),

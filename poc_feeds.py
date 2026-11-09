@@ -46,7 +46,6 @@ import requests
 # ---------------------------------------------------------------------------
 ACS = "https://pubs.acs.org/rss/{code}/asap.xml"
 WILEY = "https://onlinelibrary.wiley.com/action/showFeed?jc={code}&type=etoc&feed=rss"
-RSC = "http://feeds.rsc.org/rss/{code}"
 NATURE = "https://www.nature.com/{code}.rss"
 # ChemRxiv blocks scripts on its own API, so preprints come from Crossref
 # (every ChemRxiv DOI starts with 10.26434).
@@ -76,15 +75,16 @@ JOURNALS = [
     ("ChemMedChem",                     "Wiley",           WILEY.format(code="18607187")),
     ("ChemBioChem",                     "Wiley",           WILEY.format(code="14397633")),
     ("ChemCatChem",                     "Wiley",           WILEY.format(code="18673899")),
-    # --- RSC ---
-    ("Chemical Science",                "RSC",             RSC.format(code="sc")),
-    ("Chem. Commun.",                   "RSC",             RSC.format(code="cc")),
-    ("Org. Biomol. Chem.",              "RSC",             RSC.format(code="ob")),
-    ("Org. Chem. Front.",               "RSC",             RSC.format(code="qo")),
-    ("RSC Med. Chem.",                  "RSC",             RSC.format(code="md")),
-    ("RSC Chem. Biol.",                 "RSC",             RSC.format(code="cb")),
-    ("Chem. Soc. Rev.",                 "RSC",             RSC.format(code="cs")),
-    ("Nat. Prod. Rep.",                 "RSC",             RSC.format(code="np")),
+    # --- RSC --- feeds.rsc.org froze in June 2026 and the new RSS lists only ~5 items,
+    #             so RSC comes from Crossref by journal ISSN (no figures, full coverage)
+    ("Chemical Science",                "RSC",             "crossref:issn:2041-6539"),
+    ("Chem. Commun.",                   "RSC",             "crossref:issn:1364-548X"),
+    ("Org. Biomol. Chem.",              "RSC",             "crossref:issn:1477-0539"),
+    ("Org. Chem. Front.",               "RSC",             "crossref:issn:2052-4129"),
+    ("RSC Med. Chem.",                  "RSC",             "crossref:issn:2632-8682"),
+    ("RSC Chem. Biol.",                 "RSC",             "crossref:issn:2633-0679"),
+    ("Chem. Soc. Rev.",                 "RSC",             "crossref:issn:1460-4744"),
+    ("Nat. Prod. Rep.",                 "RSC",             "crossref:issn:1460-4752"),
     # --- Springer Nature (to test) ---
     ("Nature",                          "Springer Nature", "https://www.nature.com/nature.rss"),
     ("Nat. Commun. (chemistry)",        "Springer Nature", "https://www.nature.com/subjects/chemistry/ncomms.rss"),
@@ -211,17 +211,18 @@ def crossref_fill(article: dict, session: requests.Session) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def fetch_chemrxiv(name, publisher, url, session):
-    """Latest ChemRxiv preprints from Crossref (no images)."""
-    since = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 7 * 86400))
-    params = {"filter": f"prefix:10.26434,type:posted-content,from-created-date:{since}",
+def fetch_crossref(name, publisher, crossref_filter, session, days=7, versions=False):
+    """Recent works from Crossref (no images). crossref_filter e.g. 'issn:2041-6539'."""
+    since = time.strftime("%Y-%m-%d", time.gmtime(time.time() - days * 86400))
+    params = {"filter": f"{crossref_filter},from-created-date:{since}",
               "sort": "created", "order": "desc", "rows": 200, "cursor": "*"}
     if os.environ.get("CROSSREF_MAILTO"):
         params["mailto"] = os.environ["CROSSREF_MAILTO"]
     items = []
     try:
-        for _ in range(10):                       # up to 2,000 preprints
-            r = session.get(url, params=params, timeout=60, headers={"Accept": "application/json"})
+        for _ in range(10):                       # up to 2,000 works
+            r = session.get("https://api.crossref.org/works", params=params, timeout=60,
+                            headers={"Accept": "application/json"})
             r.raise_for_status()
             msg = r.json()["message"]
             items.extend(msg["items"])
@@ -231,31 +232,33 @@ def fetch_chemrxiv(name, publisher, url, session):
             time.sleep(0.5)
     except (requests.RequestException, ValueError, KeyError) as e:
         if not items:
-            return None, f"FAILED to fetch ChemRxiv via Crossref: {e}", []
+            return None, f"FAILED to fetch from Crossref: {e}", []
     if not items:
-        return None, "Crossref returned no ChemRxiv items for the last 7 days", []
+        return None, f"Crossref returned no items for the last {days} days", []
 
-    # each version (v1, v2 ...) has its own DOI - keep only the newest version
-    latest = {}
-    for it in items:
-        doi = it.get("DOI", "")
-        m = re.match(r"(.+?)[-/]v(\d+)$", doi)   # both ...-v2 and .../v2 styles
-        base, ver = (m.group(1), int(m.group(2))) if m else (doi, 1)
-        if base not in latest or ver > latest[base][0]:
-            latest[base] = (ver, it)
-    items, titles = [], set()
-    for _, it in latest.values():                 # also drop the same preprint under two DOIs
-        key = re.sub(r"\W+", "", " ".join(it.get("title", [])).lower())
-        if key and key in titles:
-            continue
-        titles.add(key)
-        items.append(it)
+    if versions:   # preprints: each version (v1, v2 ...) has its own DOI - keep the newest
+        latest = {}
+        for it in items:
+            doi = it.get("DOI", "")
+            m = re.match(r"(.+?)[-/]v(\d+)$", doi)   # both ...-v2 and .../v2 styles
+            base, ver = (m.group(1), int(m.group(2))) if m else (doi, 1)
+            if base not in latest or ver > latest[base][0]:
+                latest[base] = (ver, it)
+        items = [v[1] for v in latest.values()]
 
-    articles = []
+    articles, titles, skipped = [], set(), 0
     for it in items:
         title = strip_html(" ".join(it.get("title", [])))
+        key = re.sub(r"\W+", "", title.lower())
+        if not title or key in titles:            # same work under two DOIs
+            continue
+        titles.add(key)
+        if NOT_A_PAPER.search(title):             # covers, contents lists, corrections
+            skipped += 1
+            continue
         abstract = strip_html(it.get("abstract", ""))
-        parts = (it.get("posted") or it.get("created") or {}).get("date-parts", [[]])[0]
+        parts = (it.get("published-online") or it.get("posted") or it.get("published")
+                 or it.get("created") or {}).get("date-parts", [[]])[0]
         articles.append({
             "journal": name, "publisher": publisher, "title": title,
             "authors": "; ".join(f"{x.get('given', '')} {x.get('family', '')}".strip()
@@ -267,7 +270,15 @@ def fetch_chemrxiv(name, publisher, url, session):
             "topics": tag_topics(title, abstract),
             "source_note": "crossref",
         })
-    return articles, None, sorted({it.get("subtype", "") or it.get("type", "") for it in items} - {""})
+    notes = sorted({it.get("subtype", "") or it.get("type", "") for it in items} - {""})
+    if skipped:
+        notes.append(f"[skipped {skipped} non-research items]")
+    return articles, None, notes
+
+
+def fetch_chemrxiv(name, publisher, url, session):
+    """ChemRxiv blocks scripts on its own API, so preprints come from Crossref."""
+    return fetch_crossref(name, publisher, "prefix:10.26434,type:posted-content", session, versions=True)
 
 
 NON_RESEARCH = re.compile(r"\b(news|editorial|career|correction|retraction|erratum|"
@@ -278,7 +289,7 @@ NON_RESEARCH = re.compile(r"\b(news|editorial|career|correction|retraction|errat
 NOT_A_PAPER = re.compile(r"^\s*(author correction|publisher correction|correction|corrigendum|"
                          r"retraction|retracted|erratum|addendum|expression of concern|"
                          r"(inside |outside )?(front|back) cover|cover picture|cover feature|"
-                         r"frontispiece|table of contents|masthead|issue information)\b",
+                         r"frontispiece|table of contents|contents list|masthead|issue information)\b",
                          re.IGNORECASE)
 
 
@@ -307,6 +318,9 @@ def fetch_journal(name, publisher, url, session):
     """Returns (articles, error, categories seen in the feed)."""
     if publisher == "ChemRxiv":
         return fetch_chemrxiv(name, publisher, url, session)
+    if url.startswith("crossref:"):
+        return fetch_crossref(name, publisher, url[len("crossref:"):] + ",type:journal-article", session,
+                              days=30)   # the whole 30-day window, so nothing is missed
     try:
         r = session.get(url, timeout=30)
         r.raise_for_status()
