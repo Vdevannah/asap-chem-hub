@@ -1,0 +1,84 @@
+"""
+SQL for the API, kept separate from the web layer so it is easy to read and test.
+Every value from the user goes in as a query parameter (%s) - never pasted into SQL.
+"""
+
+import re
+
+ARTICLE_FIELDS = """
+    a.article_id, a.doi, a.title, a.authors, a.abstract, a.article_url,
+    a.published_date, a.image_url, a.figure_status, a.is_open_access,
+    j.journal_id, j.name AS journal, j.publisher
+"""
+
+
+def clean_search(q: str) -> str:
+    """Keep letters, digits, spaces and - for MySQL full-text search."""
+    return re.sub(r"[^\w\s\-]", " ", q or "").strip()
+
+
+def build_article_filters(journal_ids=None, topic_ids=None, days=30, q=None):
+    """WHERE clause + params shared by the list query and the count query."""
+    where = ["a.published_date >= CURDATE() - INTERVAL %s DAY"]
+    params = [days]
+    if journal_ids:
+        where.append(f"a.journal_id IN ({', '.join(['%s'] * len(journal_ids))})")
+        params += list(journal_ids)
+    if topic_ids:   # any of the chosen topics
+        where.append(
+            "EXISTS (SELECT 1 FROM article_topic_links l WHERE l.article_id = a.article_id "
+            f"AND l.topic_id IN ({', '.join(['%s'] * len(topic_ids))}))")
+        params += list(topic_ids)
+    term = clean_search(q)
+    if term:
+        where.append("MATCH(a.title, a.authors, a.abstract) AGAINST (%s IN NATURAL LANGUAGE MODE)")
+        params.append(term)
+    return " AND ".join(where), params
+
+
+def articles_query(journal_ids=None, topic_ids=None, days=30, q=None, limit=30, offset=0):
+    where, params = build_article_filters(journal_ids, topic_ids, days, q)
+    sql = f"""
+        SELECT {ARTICLE_FIELDS}
+          FROM articles a JOIN journals j ON j.journal_id = a.journal_id
+         WHERE {where}
+         ORDER BY a.published_date DESC, a.first_seen_at DESC, a.article_id DESC
+         LIMIT %s OFFSET %s"""
+    return sql, params + [limit, offset]
+
+
+def count_query(journal_ids=None, topic_ids=None, days=30, q=None):
+    where, params = build_article_filters(journal_ids, topic_ids, days, q)
+    return f"SELECT COUNT(*) AS n FROM articles a WHERE {where}", params
+
+
+def topics_for_articles_query(article_ids):
+    return (f"""SELECT l.article_id, t.name FROM article_topic_links l
+                  JOIN article_topics t ON t.topic_id = l.topic_id
+                 WHERE l.article_id IN ({', '.join(['%s'] * len(article_ids))})
+                 ORDER BY t.topic_id""", list(article_ids))
+
+
+JOURNALS_SQL = """
+    SELECT j.journal_id, j.name, j.publisher, j.picker_group, j.default_on,
+           COUNT(a.article_id) AS article_count
+      FROM journals j
+      LEFT JOIN articles a ON a.journal_id = j.journal_id
+     WHERE j.is_active
+     GROUP BY j.journal_id
+     ORDER BY FIELD(j.picker_group, 'General and flagship', 'Organic and synthesis',
+                    'Medicinal and chemical biology', 'Catalysis and inorganic',
+                    'Reviews', 'Preprints'), j.journal_id"""
+
+TOPICS_SQL = """
+    SELECT t.topic_id, t.name, COUNT(l.article_id) AS article_count
+      FROM article_topics t
+      LEFT JOIN article_topic_links l ON l.topic_id = t.topic_id
+     GROUP BY t.topic_id
+     ORDER BY t.topic_id"""
+
+STATUS_SQL = """
+    SELECT (SELECT MAX(finished_at) FROM ingestion_runs
+             WHERE job = 'articles' AND status IN ('success', 'partial')) AS last_refreshed,
+           (SELECT COUNT(*) FROM articles) AS total_articles,
+           (SELECT COUNT(*) FROM articles WHERE figure_status = 'found') AS with_figure"""
