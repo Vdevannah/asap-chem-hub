@@ -93,6 +93,24 @@ TOPICS = {
         ],
         "acronyms": [],
     },
+    "Asymmetric synthesis and catalysis": {
+        "phrases": [
+            r"\benantioselective(ly)?\b", r"\benantiospecific\b", r"\benantioconvergent\b",
+            r"\benantio(enriched|pure|merically)\b", r"\bdiastereoselective(ly)?\b",
+            r"\basymmetric (catalysis|synthes[ie]s|hydrogenation|reduction|oxidation|addition|"
+            r"alkylation|allylation|arylation|cycli[sz]ation|epoxidation|dihydroxylation|"
+            r"aldol|Mannich|Michael|cross[- ]couplings?|C[–—‐-]H|transfer hydrogenation|"
+            r"hydrofunctionali[sz]ation|organocatalysis|induction)\b",
+            r"\bchiral (catalysts?|ligands?|phosphoric acids?|amines?|Lewis acids?|auxiliar(y|ies)|"
+            r"building blocks?|centers?|centres?|sulfoxides?|phosphines?)\b",
+            r"\b(axially|planar|inherently) chiral\b", r"\batroposelective\b",
+            r"\bkinetic resolution\b", r"\bdynamic kinetic resolution\b", r"\bdesymmetri[sz]ation\b",
+            r"\bstereodivergent\b", r"\bstereoselective synthes", r"\bstereocontrol",
+            r"\benantiomeric (excess|ratio)\b", r"\b\d{2}(\.\d)?\s?% ee\b", r"\b\d{2}:\d{1,2} er\b",
+            r"\bchirality transfer\b", r"\bcentral[- ]to[- ]axial\b",
+        ],
+        "acronyms": [],
+    },
     "Total synthesis and natural products": {
         "phrases": [
             r"\btotal synthes[ie]s\b", r"\bformal synthes[ie]s\b", r"\bnatural products?\b",
