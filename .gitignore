@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 poc_results.csv
 preview.html
+.env
