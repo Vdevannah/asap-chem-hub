@@ -6,3 +6,6 @@ preview.html
 .env
 preview_springer.html
 topics_review.csv
+epo_results.csv
+preview_patents.html
+.vscode/
