@@ -139,3 +139,10 @@ PATENT_TOPICS_SQL = """
       LEFT JOIN patent_topic_links l ON l.topic_id = t.topic_id
      GROUP BY t.topic_id
      ORDER BY t.topic_id"""
+
+
+def journal_counts_query(topic_ids=None, days=30, q=None):
+    """Articles per journal under the current filters (journal filter itself left out)."""
+    where, params = build_article_filters(None, topic_ids, days, q)
+    return (f"""SELECT a.journal_id, COUNT(*) AS n FROM articles a
+                 WHERE {where} GROUP BY a.journal_id""", params)

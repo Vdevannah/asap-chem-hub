@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { formatDate, plainText } from "../api";
 import RichText from "./RichText";
+import { familyOf } from "../topics";
 
 // EPO titles are ALL CAPS. Show them in sentence case, but keep words with
 // digits (KAT6, IL-7, GLP-1) and roman numerals (I, II, IV) as they are.
@@ -29,7 +30,7 @@ function Topics({ topics }) {
   if (!topics?.length) return null;
   return (
     <ul className="card-topics">
-      {topics.map((t) => <li key={t}>{t}</li>)}
+      {topics.map((t) => <li key={t} className={`fam-${familyOf(t)}`}>{t}</li>)}
     </ul>
   );
 }

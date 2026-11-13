@@ -1,3 +1,5 @@
+import { groupTopics } from "../topics";
+
 // Shared sidebar controls: search box, day range, topic chips.
 
 export function SearchBox({ value, onChange, placeholder }) {
@@ -48,19 +50,24 @@ export function TopicChips({ topics, selected, onChange }) {
           </button>
         )}
       </legend>
-      <div className="chips">
-        {topics.map((t) => (
-          <button
-            key={t.topic_id}
-            type="button"
-            aria-pressed={selected.includes(t.topic_id)}
-            className={"chip" + (selected.includes(t.topic_id) ? " on" : "")}
-            onClick={() => toggle(t.topic_id)}
-          >
-            {t.name}
-          </button>
-        ))}
-      </div>
+      {groupTopics(topics).map((g) => (
+        <div key={g.id} className={`topic-group fam-${g.id}`}>
+          <p className="topic-group-name">{g.name}</p>
+          <div className="chips">
+            {g.items.map((t) => (
+              <button
+                key={t.topic_id}
+                type="button"
+                aria-pressed={selected.includes(t.topic_id)}
+                className={"chip" + (selected.includes(t.topic_id) ? " on" : "")}
+                onClick={() => toggle(t.topic_id)}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
       <p className="hint">{selected.length ? "Showing items in any of the chosen topics." : "All topics."}</p>
     </fieldset>
   );

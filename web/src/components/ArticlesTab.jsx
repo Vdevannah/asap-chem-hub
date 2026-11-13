@@ -6,6 +6,7 @@ import { DayRange, SearchBox, TopicChips } from "./Filters";
 import JournalPicker from "./JournalPicker";
 import Feed from "./Feed";
 import Sidebar from "./Sidebar";
+import JournalStrip from "./JournalStrip";
 
 export default function ArticlesTab({ active }) {
   const [journals, setJournals] = useState([]);
@@ -16,6 +17,8 @@ export default function ArticlesTab({ active }) {
   const [days, setDays] = useStoredState("asap.articleDays", 7);
   const [query, setQuery] = useState("");
   const [picking, setPicking] = useState(false);
+  const [focus, setFocus] = useState(null);      // one journal picked from the strip, or null = all
+  const [counts, setCounts] = useState({});
   const q = useDebounced(query.trim());
 
   useEffect(() => {
@@ -30,15 +33,31 @@ export default function ArticlesTab({ active }) {
     ? journals.filter((j) => j.default_on).map((j) => j.journal_id)
     : chosen.filter((id) => known.has(id));
   const ready = journals.length > 0;
+  const focused = focus !== null && selected.includes(focus) ? focus : null;
+
+  // live per-journal counts for the strip (same days / topics / search)
+  const countKey = JSON.stringify({ topicIds, days, q });
+  useEffect(() => {
+    api.journalCounts({ topics: topicIds, days, q })
+      .then((rows) => setCounts(Object.fromEntries(rows.map((r) => [r.journal_id, r.n]))))
+      .catch(() => setCounts({}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countKey]);
 
   const feed = useFeed(
     api.articles,
-    { journals: [...selected].sort((a, b) => a - b), topics: topicIds, days, q },
+    { journals: focused !== null ? [focused] : [...selected].sort((a, b) => a - b), topics: topicIds, days, q },
     ready && selected.length > 0,
   );
+  const stripJournals = journals.filter((j) => selected.includes(j.journal_id));
 
   return (
-    <div className="layout" hidden={!active}>
+    <div className="section" hidden={!active}>
+      <header className="section-head">
+        <h2 className="section-title">ASAP Articles</h2>
+        <div className="divider" aria-hidden="true"><span /></div>
+      </header>
+      <div className="layout">
       <Sidebar label="Article filters" active={topicIds.length + (q ? 1 : 0)}>
         <SearchBox value={query} onChange={setQuery} placeholder="Title, author or abstract" />
         <DayRange options={[7, 14, 30]} value={days} onChange={setDays} />
@@ -64,6 +83,8 @@ export default function ArticlesTab({ active }) {
             <button type="button" className="primary" onClick={() => setPicking(true)}>Choose journals</button>
           </div>
         ) : (
+          <>
+          <JournalStrip journals={stripJournals} counts={counts} focus={focused} onFocus={setFocus} />
           <Feed
             feed={feed}
             noun="article"
@@ -71,6 +92,7 @@ export default function ArticlesTab({ active }) {
             emptyText="No articles match these filters. Try more days, fewer topics or another search."
             render={(a) => <ArticleCard key={a.article_id} a={a} />}
           />
+          </>
         )}
       </section>
 
@@ -82,6 +104,7 @@ export default function ArticlesTab({ active }) {
           onClose={() => setPicking(false)}
         />
       )}
+      </div>
     </div>
   );
 }

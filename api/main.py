@@ -11,6 +11,7 @@ Endpoints
     GET /journals               journals for the picker (grouped, with defaults)
     GET /topics                 topics with article counts
     GET /articles               the feed: filters for journals, topics, days, search; paging
+    GET /journal-counts         articles per journal for the current days/topics/search
     GET /patent-topics          patent topics with patent counts
     GET /patents                new WO patents: filters for topics, days (up to 90), search; paging
 """
@@ -152,6 +153,23 @@ def journals():
 def topics():
     with get_cursor() as cur:
         cur.execute(queries.TOPICS_SQL)
+        return cur.fetchall()
+
+
+class JournalCount(BaseModel):
+    journal_id: int
+    n: int
+
+
+@app.get("/journal-counts", response_model=List[JournalCount])
+def journal_counts(
+    topics: Optional[str] = Query(None, description="topic IDs, e.g. 2,6 (any of them)"),
+    days: int = Query(30, ge=1, le=30),
+    q: Optional[str] = Query(None, max_length=200),
+):
+    with get_cursor() as cur:
+        sql, params = queries.journal_counts_query(_ids(topics), days, q)
+        cur.execute(sql, params)
         return cur.fetchall()
 
 

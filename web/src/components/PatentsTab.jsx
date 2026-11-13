@@ -26,7 +26,12 @@ export default function PatentsTab({ active }) {
   const feed = useFeed(api.patents, { topics: chosenTopics, days, q }, opened);
 
   return (
-    <div className="layout patents" hidden={!active}>
+    <div className="section" hidden={!active}>
+      <header className="section-head">
+        <h2 className="section-title">New Patents</h2>
+        <div className="divider" aria-hidden="true"><span /></div>
+      </header>
+      <div className="layout patents">
       <Sidebar label="Patent filters" active={chosenTopics.length + (q ? 1 : 0)}>
         <SearchBox value={query} onChange={setQuery} placeholder="Title, applicant or abstract" />
         <DayRange options={[7, 30, 90]} value={days} onChange={setDays} />
@@ -53,6 +58,7 @@ export default function PatentsTab({ active }) {
           />
         )}
       </section>
+      </div>
     </div>
   );
 }

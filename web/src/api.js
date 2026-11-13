@@ -18,6 +18,7 @@ export const api = {
   topics: () => get("/topics"),
   patentTopics: () => get("/patent-topics"),
   articles: (p) => get("/articles", p),
+  journalCounts: (p) => get("/journal-counts", p),
   patents: (p) => get("/patents", p),
 };
 
