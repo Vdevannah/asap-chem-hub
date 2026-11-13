@@ -81,4 +81,61 @@ STATUS_SQL = """
     SELECT (SELECT MAX(finished_at) FROM ingestion_runs
              WHERE job = 'articles' AND status IN ('success', 'partial')) AS last_refreshed,
            (SELECT COUNT(*) FROM articles) AS total_articles,
-           (SELECT COUNT(*) FROM articles WHERE figure_status = 'found') AS with_figure"""
+           (SELECT COUNT(*) FROM articles WHERE figure_status = 'found') AS with_figure,
+           (SELECT MAX(finished_at) FROM ingestion_runs
+             WHERE job = 'patents' AND status IN ('success', 'partial')) AS patents_last_refreshed,
+           (SELECT COUNT(*) FROM patents) AS total_patents"""
+
+
+# ---------------------------------------------------------------------------
+# New Patents (separate tables, same filter style as articles)
+# ---------------------------------------------------------------------------
+PATENT_FIELDS = """
+    p.patent_id, p.publication_number, p.office, p.title, p.applicants, p.inventors,
+    p.abstract, p.cpc_codes, p.family_id, p.patent_url, p.published_date
+"""
+
+
+def build_patent_filters(topic_ids=None, days=90, q=None):
+    where = ["p.published_date >= CURDATE() - INTERVAL %s DAY"]
+    params = [days]
+    if topic_ids:
+        where.append(
+            "EXISTS (SELECT 1 FROM patent_topic_links l WHERE l.patent_id = p.patent_id "
+            f"AND l.topic_id IN ({', '.join(['%s'] * len(topic_ids))}))")
+        params += list(topic_ids)
+    term = clean_search(q)
+    if term:
+        where.append("MATCH(p.title, p.applicants, p.abstract) AGAINST (%s IN NATURAL LANGUAGE MODE)")
+        params.append(term)
+    return " AND ".join(where), params
+
+
+def patents_query(topic_ids=None, days=90, q=None, limit=30, offset=0):
+    where, params = build_patent_filters(topic_ids, days, q)
+    sql = f"""
+        SELECT {PATENT_FIELDS} FROM patents p
+         WHERE {where}
+         ORDER BY p.published_date DESC, p.patent_id DESC
+         LIMIT %s OFFSET %s"""
+    return sql, params + [limit, offset]
+
+
+def patent_count_query(topic_ids=None, days=90, q=None):
+    where, params = build_patent_filters(topic_ids, days, q)
+    return f"SELECT COUNT(*) AS n FROM patents p WHERE {where}", params
+
+
+def topics_for_patents_query(patent_ids):
+    return (f"""SELECT l.patent_id, t.name FROM patent_topic_links l
+                  JOIN patent_topics t ON t.topic_id = l.topic_id
+                 WHERE l.patent_id IN ({', '.join(['%s'] * len(patent_ids))})
+                 ORDER BY t.topic_id""", list(patent_ids))
+
+
+PATENT_TOPICS_SQL = """
+    SELECT t.topic_id, t.name, COUNT(l.patent_id) AS patent_count
+      FROM patent_topics t
+      LEFT JOIN patent_topic_links l ON l.topic_id = t.topic_id
+     GROUP BY t.topic_id
+     ORDER BY t.topic_id"""

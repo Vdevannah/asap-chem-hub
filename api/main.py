@@ -11,7 +11,8 @@ Endpoints
     GET /journals               journals for the picker (grouped, with defaults)
     GET /topics                 topics with article counts
     GET /articles               the feed: filters for journals, topics, days, search; paging
-    GET /patents                placeholder until the patents section is built
+    GET /patent-topics          patent topics with patent counts
+    GET /patents                new WO patents: filters for topics, days (up to 90), search; paging
 """
 
 from datetime import date, datetime
@@ -85,6 +86,36 @@ class Status(BaseModel):
     last_refreshed: Optional[datetime] = None
     total_articles: int
     with_figure: int
+    patents_last_refreshed: Optional[datetime] = None
+    total_patents: int
+
+
+class PatentTopic(BaseModel):
+    topic_id: int
+    name: str
+    patent_count: int
+
+
+class Patent(BaseModel):
+    patent_id: int
+    publication_number: str
+    office: str
+    title: str
+    applicants: Optional[str] = None
+    inventors: Optional[str] = None
+    abstract: Optional[str] = None
+    cpc_codes: Optional[str] = None
+    family_id: Optional[str] = None
+    patent_url: Optional[str] = None
+    published_date: date
+    topics: List[str] = []
+
+
+class PatentPage(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: List[Patent]
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +187,37 @@ def articles(
     return {"total": total, "limit": limit, "offset": offset, "items": items}
 
 
-@app.get("/patents")
-def patents():
-    return {"status": "coming_soon",
-            "message": "New Patents is coming soon. Patent data from the EPO is being set up."}
+@app.get("/patent-topics", response_model=List[PatentTopic])
+def patent_topics():
+    with get_cursor() as cur:
+        cur.execute(queries.PATENT_TOPICS_SQL)
+        return cur.fetchall()
+
+
+@app.get("/patents", response_model=PatentPage)
+def patents(
+    topics: Optional[str] = Query(None, description="patent topic IDs, e.g. 12,13 (any of them)"),
+    days: int = Query(90, ge=1, le=90, description="published in the last N days"),
+    q: Optional[str] = Query(None, max_length=200, description="keyword search (title, applicant, abstract)"),
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    topic_ids = _ids(topics)
+    with get_cursor() as cur:
+        sql, params = queries.patent_count_query(topic_ids, days, q)
+        cur.execute(sql, params)
+        total = cur.fetchone()["n"]
+
+        sql, params = queries.patents_query(topic_ids, days, q, limit, offset)
+        cur.execute(sql, params)
+        items = cur.fetchall()
+
+        if items:
+            sql, params = queries.topics_for_patents_query([p["patent_id"] for p in items])
+            cur.execute(sql, params)
+            by_patent = {}
+            for row in cur.fetchall():
+                by_patent.setdefault(row["patent_id"], []).append(row["name"])
+            for p in items:
+                p["topics"] = by_patent.get(p["patent_id"], [])
+    return {"total": total, "limit": limit, "offset": offset, "items": items}

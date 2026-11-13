@@ -141,6 +141,9 @@ INSERT INTO article_topics (name) VALUES
   ('Computational chemistry and AI'), ('Analytical and physical chemistry');
 
 INSERT INTO patent_topics (name) SELECT name FROM article_topics;   -- same names, separate table
+-- patent-only topics (each comes from its own EPO search stream)
+INSERT INTO patent_topics (name) VALUES
+  ('Antibody-drug conjugates'), ('Antibodies'), ('OLED materials and devices');
 
 -- The 37 feeds tested in the proof of concept. ChemRxiv (~360 preprints a week)
 -- starts switched off so it does not flood the default feed.

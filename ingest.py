@@ -1,7 +1,7 @@
 """
 ASAP Chem Hub - ingestion pipeline (Phase 5)
 ============================================
-Keeps the database fresh. Three jobs:
+Keeps the database fresh. Four jobs:
 
   articles  fetch every active journal in the `journals` table, add only NEW DOIs,
             fill gaps from Crossref (Nature, Science) and the Springer Meta API,
@@ -9,6 +9,9 @@ Keeps the database fresh. Three jobs:
   figures   re-check open-access Nature articles marked 'pending' and add
             Figure 1 when Springer has indexed the full text;
             give up after 14 days.                               -> daily
+  patents   search EPO for new WO patents (5 search streams, last 14 days,
+            because EPO loads each weekly batch several days late),
+            add only NEW publication numbers, tag topics.       -> daily
   cleanup   delete articles older than 30 days, patents older than 90.  -> daily
 
 Every job writes one row to `ingestion_runs`. A failing feed is recorded in
@@ -18,16 +21,21 @@ Usage
     python ingest.py articles                 # all active journals
     python ingest.py articles --only "ACS"    # one publisher (comma-separated list)
     python ingest.py figures
+    python ingest.py patents                  # last 14 days
+    python ingest.py patents --days 90        # first run: fill the whole 90-day window (~20 min)
     python ingest.py cleanup
-    python ingest.py all                      # articles, then figures, then cleanup
+    python ingest.py all                      # articles, figures, patents, cleanup
 """
 
 import argparse
 import sys
 import time
 
+from datetime import date, timedelta
+
 import requests
 
+import epo
 import poc_feeds as feeds
 import springer
 from load_poc import clean_abstract, connect, to_date
@@ -38,6 +46,8 @@ PATENT_DAYS = 90
 FIGURE_RETRY_DAYS = 14      # stop re-checking a 'pending' figure after this
 FIGURE_RETRY_HOURS = 20     # re-check each pending figure at most once a day
 STALE_DAYS = 14             # warn when a feed's newest article is older than this
+PATENT_LOOKBACK_DAYS = 28   # EPO loads WO batches late, so look back two weeks
+PATENT_OFFICE = "WO"
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +227,78 @@ def job_figures(db, session):
 
 
 # ---------------------------------------------------------------------------
-# Job 3: cleanup
+# Job 3: patents (EPO OPS)
+# ---------------------------------------------------------------------------
+def job_patents(db, session, days=PATENT_LOOKBACK_DAYS):
+    cur = db.cursor()
+    run_id = start_run(db, "patents")
+    if not epo.enabled():
+        finish_run(db, run_id, "failed", notes="EPO_KEY / EPO_SECRET missing in .env")
+        print("patents: skipped - EPO keys missing in .env")
+        return 0
+    days = min(days, PATENT_DAYS)
+    cur.execute("SELECT name, topic_id FROM patent_topics")
+    topic_ids = dict(cur.fetchall())
+    missing = [t for t in epo.STREAM_TOPICS if t not in topic_ids]
+    if missing:
+        finish_run(db, run_id, "failed", notes=f"patent_topics missing: {missing}")
+        print(f"patents: run add_patent_topics.sql first - missing topics {missing}")
+        return 0
+    cur.execute("SELECT publication_number FROM patents")
+    known = {row[0] for row in cur.fetchall()}
+
+    client = epo.Client(session)
+    found, failed = {}, []                    # publication_number -> patent
+    today = date.today()
+    # search in 7-day windows so no single search passes EPO's 2000-result limit
+    windows = [(today - timedelta(days=min(d + 6, days)), today - timedelta(days=d))
+               for d in range(0, days, 7)]
+    for start, end in windows:
+        for stream, sq in epo.STREAMS.items():
+            query = f'pn={PATENT_OFFICE} and pd within "{start:%Y%m%d} {end:%Y%m%d}" and ({sq})'
+            try:
+                got, err = client.fetch(query)
+            except requests.RequestException as e:
+                got, err = [], str(e)
+            if err:
+                failed.append(f"{stream} {start}: {err[:120]}")
+            for p in got:
+                keep = found.setdefault(p["publication_number"], p)
+                if stream != epo.GENERAL and stream not in keep["topics"]:
+                    keep["topics"].append(stream)
+            print(f"  {start} to {end}  {stream:30s} {len(got):4d}" + ("  FAILED" if err else ""))
+
+    new = 0
+    for pn, p in found.items():
+        if pn in known or not p["published"]:
+            continue
+        cur.execute(
+            """INSERT IGNORE INTO patents
+                 (publication_number, office, title, applicants, inventors, abstract,
+                  cpc_codes, family_id, patent_url, published_date)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (pn, p["office"], (p["title"] or "(no English title)")[:1000], p["applicants"],
+             p["inventors"], p["abstract"] or None, p["cpc_codes"][:1000], p["family_id"] or None,
+             p["patent_url"], p["published"]))
+        if cur.rowcount == 0:
+            continue
+        patent_id = cur.lastrowid
+        for topic in p["topics"]:
+            if topic in topic_ids:
+                cur.execute("INSERT IGNORE INTO patent_topic_links (patent_id, topic_id) VALUES (%s, %s)",
+                            (patent_id, topic_ids[topic]))
+        new += 1
+    db.commit()
+
+    searches = len(windows) * len(epo.STREAMS)
+    status = "failed" if len(failed) == searches else ("partial" if failed else "success")
+    finish_run(db, run_id, status, seen=len(found), new=new, notes="; ".join(failed))
+    print(f"patents: {new} new of {len(found)} found, {len(failed)} search(es) failed -> {status}")
+    return new
+
+
+# ---------------------------------------------------------------------------
+# Job 4: cleanup
 # ---------------------------------------------------------------------------
 def job_cleanup(db):
     cur = db.cursor()
@@ -237,8 +318,10 @@ def job_cleanup(db):
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("job", choices=["articles", "figures", "cleanup", "all"])
+    ap.add_argument("job", choices=["articles", "figures", "patents", "cleanup", "all"])
     ap.add_argument("--only", default="", help='publishers for the articles job, e.g. "ACS,Wiley"')
+    ap.add_argument("--days", type=int, default=PATENT_LOOKBACK_DAYS,
+                    help="patents job: how many days back to search (max 90)")
     args = ap.parse_args()
     only = {p.strip().lower() for p in args.only.split(",") if p.strip()}
 
@@ -252,6 +335,8 @@ def main():
             job_articles(db, session, only)
         if args.job in ("figures", "all"):
             job_figures(db, session)
+        if args.job in ("patents", "all"):
+            job_patents(db, requests.Session(), args.days)   # plain session: no feed headers
         if args.job in ("cleanup", "all"):
             job_cleanup(db)
     finally:
