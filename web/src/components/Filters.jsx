@@ -37,7 +37,8 @@ export function DayRange({ options, value, onChange }) {
   );
 }
 
-export function TopicChips({ topics, selected, onChange }) {
+// counts (optional): { topic_id: n } for the current filters other than topics.
+export function TopicChips({ topics, selected, onChange, counts }) {
   const toggle = (id) =>
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   return (
@@ -54,17 +55,22 @@ export function TopicChips({ topics, selected, onChange }) {
         <div key={g.id} className={`topic-group fam-${g.id}`}>
           <p className="topic-group-name">{g.name}</p>
           <div className="chips">
-            {g.items.map((t) => (
-              <button
-                key={t.topic_id}
-                type="button"
-                aria-pressed={selected.includes(t.topic_id)}
-                className={"chip" + (selected.includes(t.topic_id) ? " on" : "")}
-                onClick={() => toggle(t.topic_id)}
-              >
-                {t.name}
-              </button>
-            ))}
+            {g.items.map((t) => {
+              const n = counts ? counts[t.topic_id] || 0 : null;
+              const on = selected.includes(t.topic_id);
+              return (
+                <button
+                  key={t.topic_id}
+                  type="button"
+                  aria-pressed={on}
+                  className={"chip" + (on ? " on" : "") + (n === 0 ? " zero" : "")}
+                  onClick={() => toggle(t.topic_id)}
+                >
+                  {t.name}
+                  {n !== null && <span className="chip-n">{n.toLocaleString()}</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       ))}

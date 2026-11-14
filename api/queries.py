@@ -8,7 +8,7 @@ import re
 ARTICLE_FIELDS = """
     a.article_id, a.doi, a.title, a.authors, a.abstract, a.article_url,
     a.published_date, a.image_url, a.figure_status, a.is_open_access,
-    j.journal_id, j.name AS journal, j.publisher
+    a.first_seen_at, j.journal_id, j.name AS journal, j.publisher
 """
 
 
@@ -47,9 +47,14 @@ def articles_query(journal_ids=None, topic_ids=None, days=30, q=None, limit=30, 
     return sql, params + [limit, offset]
 
 
-def count_query(journal_ids=None, topic_ids=None, days=30, q=None):
+# How many rows first appeared after `since` (a naive UTC datetime). NULL since -> 0.
+NEW_SINCE = "CAST(COALESCE(SUM({alias}.first_seen_at > %s), 0) AS SIGNED)"
+
+
+def count_query(journal_ids=None, topic_ids=None, days=30, q=None, since=None):
     where, params = build_article_filters(journal_ids, topic_ids, days, q)
-    return f"SELECT COUNT(*) AS n FROM articles a WHERE {where}", params
+    return (f"SELECT COUNT(*) AS n, {NEW_SINCE.format(alias='a')} AS new_n FROM articles a WHERE {where}",
+            [since] + params)
 
 
 def topics_for_articles_query(article_ids):
@@ -92,13 +97,26 @@ STATUS_SQL = """
 # ---------------------------------------------------------------------------
 PATENT_FIELDS = """
     p.patent_id, p.publication_number, p.office, p.title, p.applicants, p.inventors,
-    p.abstract, p.cpc_codes, p.family_id, p.patent_url, p.published_date
+    p.abstract, p.cpc_codes, p.family_id, p.patent_url, p.published_date, p.first_seen_at
 """
 
 
-def build_patent_filters(topic_ids=None, days=90, q=None):
+def like_escape(text: str) -> str:
+    """Make % and _ (and the escape character itself) match literally inside LIKE."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def clean_applicant(part: str) -> str:
+    """'HOFFMANN LA ROCHE [CH] ' -> 'HOFFMANN LA ROCHE'"""
+    return re.sub(r"\s+", " ", re.sub(r"\[[A-Za-z]{2}\]\s*$", "", part.strip())).strip()
+
+
+def build_patent_filters(topic_ids=None, days=90, q=None, applicant=None):
     where = ["p.published_date >= CURDATE() - INTERVAL %s DAY"]
     params = [days]
+    if applicant:   # one cleaned applicant name, matched anywhere in the applicants list
+        where.append("p.applicants LIKE %s")
+        params.append(f"%{like_escape(applicant)}%")
     if topic_ids:
         where.append(
             "EXISTS (SELECT 1 FROM patent_topic_links l WHERE l.patent_id = p.patent_id "
@@ -111,8 +129,8 @@ def build_patent_filters(topic_ids=None, days=90, q=None):
     return " AND ".join(where), params
 
 
-def patents_query(topic_ids=None, days=90, q=None, limit=30, offset=0):
-    where, params = build_patent_filters(topic_ids, days, q)
+def patents_query(topic_ids=None, days=90, q=None, limit=30, offset=0, applicant=None):
+    where, params = build_patent_filters(topic_ids, days, q, applicant)
     sql = f"""
         SELECT {PATENT_FIELDS} FROM patents p
          WHERE {where}
@@ -121,9 +139,10 @@ def patents_query(topic_ids=None, days=90, q=None, limit=30, offset=0):
     return sql, params + [limit, offset]
 
 
-def patent_count_query(topic_ids=None, days=90, q=None):
-    where, params = build_patent_filters(topic_ids, days, q)
-    return f"SELECT COUNT(*) AS n FROM patents p WHERE {where}", params
+def patent_count_query(topic_ids=None, days=90, q=None, since=None, applicant=None):
+    where, params = build_patent_filters(topic_ids, days, q, applicant)
+    return (f"SELECT COUNT(*) AS n, {NEW_SINCE.format(alias='p')} AS new_n FROM patents p WHERE {where}",
+            [since] + params)
 
 
 def topics_for_patents_query(patent_ids):
@@ -141,8 +160,57 @@ PATENT_TOPICS_SQL = """
      ORDER BY t.topic_id"""
 
 
-def journal_counts_query(topic_ids=None, days=30, q=None):
-    """Articles per journal under the current filters (journal filter itself left out)."""
+def journal_counts_query(topic_ids=None, days=30, q=None, since=None):
+    """Articles (and new articles) per journal under the current filters (journal filter left out)."""
     where, params = build_article_filters(None, topic_ids, days, q)
-    return (f"""SELECT a.journal_id, COUNT(*) AS n FROM articles a
-                 WHERE {where} GROUP BY a.journal_id""", params)
+    return (f"""SELECT a.journal_id, COUNT(*) AS n, {NEW_SINCE.format(alias='a')} AS new_n
+                  FROM articles a
+                 WHERE {where} GROUP BY a.journal_id""", [since] + params)
+
+
+def topic_counts_query(journal_ids=None, days=30, q=None):
+    """Articles per topic under the current filters (topic filter itself left out)."""
+    where, params = build_article_filters(journal_ids, None, days, q)
+    return (f"""SELECT l.topic_id, COUNT(*) AS n
+                  FROM articles a JOIN article_topic_links l ON l.article_id = a.article_id
+                 WHERE {where} GROUP BY l.topic_id""", params)
+
+
+def patent_topic_counts_query(days=90, q=None):
+    """Patents per topic under the current filters (topic filter itself left out)."""
+    where, params = build_patent_filters(None, days, q)
+    return (f"""SELECT l.topic_id, COUNT(*) AS n
+                  FROM patents p JOIN patent_topic_links l ON l.patent_id = p.patent_id
+                 WHERE {where} GROUP BY l.topic_id""", params)
+
+
+def patent_applicants_query(topic_ids=None, days=90, q=None):
+    """Raw applicant strings of the filtered patents; split and counted in Python."""
+    where, params = build_patent_filters(topic_ids, days, q)
+    return f"SELECT p.applicants FROM patents p WHERE {where} AND p.applicants IS NOT NULL", params
+
+
+def top_applicants(rows, limit=12):
+    """Count applicants across rows like 'NAME A [US]; NAME B [SE]', merging case differences.
+    Each name counts once per patent. Shows the most common spelling of each name."""
+    counts, spellings = {}, {}
+    for (text,) in rows:
+        seen = set()
+        for part in (text or "").split(";"):
+            name = clean_applicant(part)
+            key = name.casefold()
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            counts[key] = counts.get(key, 0) + 1
+            spellings.setdefault(key, {})
+            spellings[key][name] = spellings[key].get(name, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    return [{"name": max(spellings[k].items(), key=lambda s: s[1])[0], "n": n} for k, n in top]
+
+
+def patent_weeks_query(topic_ids=None, days=90, q=None, applicant=None):
+    """Patents per publication date (WO applications are published weekly), newest first."""
+    where, params = build_patent_filters(topic_ids, days, q, applicant)
+    return (f"""SELECT p.published_date, COUNT(*) AS n FROM patents p
+                 WHERE {where} GROUP BY p.published_date ORDER BY p.published_date DESC""", params)

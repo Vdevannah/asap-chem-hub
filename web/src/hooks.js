@@ -38,6 +38,7 @@ export function useStoredState(key, initial) {
 export function useFeed(fetcher, params, enabled = true, pageSize = 30) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(null);
+  const [newCount, setNewCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const reqId = useRef(0);
@@ -52,6 +53,7 @@ export function useFeed(fetcher, params, enabled = true, pageSize = 30) {
       if (id !== reqId.current) return;
       setItems((prev) => (offset === 0 ? page.items : [...prev, ...page.items]));
       setTotal(page.total);
+      if (offset === 0) setNewCount(page.new_count || 0);
     } catch (e) {
       if (id === reqId.current) setError(e.message);
     } finally {
@@ -63,6 +65,7 @@ export function useFeed(fetcher, params, enabled = true, pageSize = 30) {
     if (!enabled) return;
     setItems([]);
     setTotal(null);
+    setNewCount(0);
     load(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
@@ -70,6 +73,7 @@ export function useFeed(fetcher, params, enabled = true, pageSize = 30) {
   return {
     items,
     total,
+    newCount,
     loading,
     error,
     hasMore: total !== null && items.length < total,

@@ -29,14 +29,18 @@ export default function About({ active }) {
         <h3>Limits</h3>
         <p>
           The patent section is for awareness only. It is not a freedom-to-operate or patentability search.
-          Articles are kept for 30 days and patents for 90.
+          Articles are kept for 30 days and patents for 90. Figures are shown only from the publishers' own servers
+          and are never stored or redistributed by this site; titles and abstracts come from the publishers'
+          public feeds, and every item links to the original.
         </p>
 
         <h3>Who made it</h3>
         <p>
-          Built by Vijayarajan Devannah, a synthetic organic chemist working in medicinal and OLED chemistry and
-          in data engineering. The code is on <a href="https://github.com/Vdevannah">GitHub</a>.
+          Designed and built by Vijayarajan Devannah, a PhD synthetic organic chemist working in medicinal and
+          OLED chemistry and in data engineering.
         </p>
+
+        <p className="image-credit">Banner image: AI-generated for ASAP Chem Hub.</p>
       </div>
     </section>
   );

@@ -12,11 +12,15 @@ Endpoints
     GET /topics                 topics with article counts
     GET /articles               the feed: filters for journals, topics, days, search; paging
     GET /journal-counts         articles per journal for the current days/topics/search
+    GET /topic-counts           articles per topic for the current journals/days/search
     GET /patent-topics          patent topics with patent counts
+    GET /patent-topic-counts    patents per topic for the current days/search
+    GET /patent-applicants      top 12 applicants for the current topics/days/search
+    GET /patent-weeks           patents per publication date for the current filters
     GET /patents                new WO patents: filters for topics, days (up to 90), search; paging
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -73,11 +77,13 @@ class Article(BaseModel):
     journal_id: int
     journal: str
     publisher: str
+    first_seen_at: datetime
     topics: List[str] = []
 
 
 class ArticlePage(BaseModel):
     total: int
+    new_count: int = 0
     limit: int
     offset: int
     items: List[Article]
@@ -109,11 +115,13 @@ class Patent(BaseModel):
     family_id: Optional[str] = None
     patent_url: Optional[str] = None
     published_date: date
+    first_seen_at: datetime
     topics: List[str] = []
 
 
 class PatentPage(BaseModel):
     total: int
+    new_count: int = 0
     limit: int
     offset: int
     items: List[Patent]
@@ -128,6 +136,16 @@ def _ids(text: Optional[str]) -> List[int]:
         return [int(x) for x in text.split(",") if x.strip()]
     except ValueError:
         raise HTTPException(status_code=422, detail="IDs must be comma-separated numbers, e.g. 1,4,7")
+
+
+SINCE_HELP = "ISO datetime of your last visit, e.g. 2026-11-12T18:40:00Z; adds counts of items first seen after it"
+
+
+def _naive_utc(since: Optional[datetime]) -> Optional[datetime]:
+    """MySQL stores UTC without a zone, so compare against a naive UTC datetime."""
+    if since is None or since.tzinfo is None:
+        return since
+    return since.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 @app.get("/health")
@@ -159,6 +177,7 @@ def topics():
 class JournalCount(BaseModel):
     journal_id: int
     n: int
+    new_n: int = 0
 
 
 @app.get("/journal-counts", response_model=List[JournalCount])
@@ -166,9 +185,27 @@ def journal_counts(
     topics: Optional[str] = Query(None, description="topic IDs, e.g. 2,6 (any of them)"),
     days: int = Query(30, ge=1, le=30),
     q: Optional[str] = Query(None, max_length=200),
+    since: Optional[datetime] = Query(None, description=SINCE_HELP),
 ):
     with get_cursor() as cur:
-        sql, params = queries.journal_counts_query(_ids(topics), days, q)
+        sql, params = queries.journal_counts_query(_ids(topics), days, q, _naive_utc(since))
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+
+class TopicCount(BaseModel):
+    topic_id: int
+    n: int
+
+
+@app.get("/topic-counts", response_model=List[TopicCount])
+def topic_counts(
+    journals: Optional[str] = Query(None, description="journal IDs, e.g. 1,4,7 (empty = all)"),
+    days: int = Query(30, ge=1, le=30),
+    q: Optional[str] = Query(None, max_length=200),
+):
+    with get_cursor() as cur:
+        sql, params = queries.topic_counts_query(_ids(journals), days, q)
         cur.execute(sql, params)
         return cur.fetchall()
 
@@ -179,14 +216,16 @@ def articles(
     topics: Optional[str] = Query(None, description="topic IDs, e.g. 2,6 (any of them)"),
     days: int = Query(30, ge=1, le=30, description="published in the last N days"),
     q: Optional[str] = Query(None, max_length=200, description="keyword search"),
+    since: Optional[datetime] = Query(None, description=SINCE_HELP),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     journal_ids, topic_ids = _ids(journals), _ids(topics)
     with get_cursor() as cur:
-        sql, params = queries.count_query(journal_ids, topic_ids, days, q)
+        sql, params = queries.count_query(journal_ids, topic_ids, days, q, _naive_utc(since))
         cur.execute(sql, params)
-        total = cur.fetchone()["n"]
+        row = cur.fetchone()
+        total, new_count = row["n"], row["new_n"]
 
         sql, params = queries.articles_query(journal_ids, topic_ids, days, q, limit, offset)
         cur.execute(sql, params)
@@ -202,7 +241,7 @@ def articles(
                 a["topics"] = by_article.get(a["article_id"], [])
                 if a["is_open_access"] is not None:
                     a["is_open_access"] = bool(a["is_open_access"])
-    return {"total": total, "limit": limit, "offset": offset, "items": items}
+    return {"total": total, "new_count": new_count, "limit": limit, "offset": offset, "items": items}
 
 
 @app.get("/patent-topics", response_model=List[PatentTopic])
@@ -212,21 +251,74 @@ def patent_topics():
         return cur.fetchall()
 
 
+@app.get("/patent-topic-counts", response_model=List[TopicCount])
+def patent_topic_counts(
+    days: int = Query(90, ge=1, le=90),
+    q: Optional[str] = Query(None, max_length=200),
+):
+    with get_cursor() as cur:
+        sql, params = queries.patent_topic_counts_query(days, q)
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+
+APPLICANT_HELP = "one applicant name as returned by /patent-applicants, e.g. HOFFMANN LA ROCHE"
+
+
+class ApplicantCount(BaseModel):
+    name: str
+    n: int
+
+
+@app.get("/patent-applicants", response_model=List[ApplicantCount])
+def patent_applicants(
+    topics: Optional[str] = Query(None, description="patent topic IDs, e.g. 12,13 (any of them)"),
+    days: int = Query(90, ge=1, le=90),
+    q: Optional[str] = Query(None, max_length=200),
+):
+    with get_cursor() as cur:
+        sql, params = queries.patent_applicants_query(_ids(topics), days, q)
+        cur.execute(sql, params)
+        rows = [(r["applicants"],) for r in cur.fetchall()]
+    return queries.top_applicants(rows)
+
+
+class WeekCount(BaseModel):
+    published_date: date
+    n: int
+
+
+@app.get("/patent-weeks", response_model=List[WeekCount])
+def patent_weeks(
+    topics: Optional[str] = Query(None, description="patent topic IDs, e.g. 12,13 (any of them)"),
+    days: int = Query(90, ge=1, le=90),
+    q: Optional[str] = Query(None, max_length=200),
+    applicant: Optional[str] = Query(None, max_length=200, description=APPLICANT_HELP),
+):
+    with get_cursor() as cur:
+        sql, params = queries.patent_weeks_query(_ids(topics), days, q, applicant)
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+
 @app.get("/patents", response_model=PatentPage)
 def patents(
     topics: Optional[str] = Query(None, description="patent topic IDs, e.g. 12,13 (any of them)"),
     days: int = Query(90, ge=1, le=90, description="published in the last N days"),
     q: Optional[str] = Query(None, max_length=200, description="keyword search (title, applicant, abstract)"),
+    since: Optional[datetime] = Query(None, description=SINCE_HELP),
+    applicant: Optional[str] = Query(None, max_length=200, description=APPLICANT_HELP),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     topic_ids = _ids(topics)
     with get_cursor() as cur:
-        sql, params = queries.patent_count_query(topic_ids, days, q)
+        sql, params = queries.patent_count_query(topic_ids, days, q, _naive_utc(since), applicant)
         cur.execute(sql, params)
-        total = cur.fetchone()["n"]
+        row = cur.fetchone()
+        total, new_count = row["n"], row["new_n"]
 
-        sql, params = queries.patents_query(topic_ids, days, q, limit, offset)
+        sql, params = queries.patents_query(topic_ids, days, q, limit, offset, applicant)
         cur.execute(sql, params)
         items = cur.fetchall()
 
@@ -238,4 +330,4 @@ def patents(
                 by_patent.setdefault(row["patent_id"], []).append(row["name"])
             for p in items:
                 p["topics"] = by_patent.get(p["patent_id"], [])
-    return {"total": total, "limit": limit, "offset": offset, "items": items}
+    return {"total": total, "new_count": new_count, "limit": limit, "offset": offset, "items": items}

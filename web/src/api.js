@@ -19,7 +19,11 @@ export const api = {
   patentTopics: () => get("/patent-topics"),
   articles: (p) => get("/articles", p),
   journalCounts: (p) => get("/journal-counts", p),
+  topicCounts: (p) => get("/topic-counts", p),
+  patentTopicCounts: (p) => get("/patent-topic-counts", p),
   patents: (p) => get("/patents", p),
+  patentApplicants: (p) => get("/patent-applicants", p),
+  patentWeeks: (p) => get("/patent-weeks", p),
 };
 
 // MySQL stores UTC without a zone; mark it as UTC so the browser shows local time.

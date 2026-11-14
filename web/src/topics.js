@@ -1,5 +1,5 @@
 // Topic families: each family has one colour, used on chips and card tags.
-// Topics not listed fall into "Other" (graphite).
+// Topics not listed fall into "Other" (slate).
 export const FAMILIES = [
   {
     id: "synthesis",

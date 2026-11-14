@@ -3,8 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="author" content="Vijayarajan Devannah" />
     <meta name="description" content="ASAP articles and new patents in one place: the newest chemistry papers with graphical abstracts, and new WO patent applications, filtered by topic." />
+    <meta name="theme-color" content="#eef1ee" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script>
+      // Apply the saved colour theme before the page paints (no light flash in dark mode).
+      // Keep in step with src/theme.js. Page colours: light #eef1ee, dark #111815.
+      (function () {
+        var mode = "auto";
+        try { mode = localStorage.getItem("asap.theme") || "auto"; } catch (e) {}
+        var dark = mode === "dark" ||
+          (mode !== "light" && !!window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", dark ? "#111815" : "#eef1ee");
+      })();
+    </script>
     <title>ASAP Chem Hub</title>
   </head>
   <body>

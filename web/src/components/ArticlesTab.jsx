@@ -4,9 +4,14 @@ import { useDebounced, useFeed, useStoredState } from "../hooks";
 import { ArticleCard } from "./Cards";
 import { DayRange, SearchBox, TopicChips } from "./Filters";
 import JournalPicker from "./JournalPicker";
+import Lightbox from "./Lightbox";
 import Feed from "./Feed";
 import Sidebar from "./Sidebar";
 import JournalStrip from "./JournalStrip";
+import SinceBar, { ViewSwitch } from "./SinceBar";
+import { getBaseline, isNewSince } from "../visits";
+
+const baseline = getBaseline();   // fixed for this page load
 
 export default function ArticlesTab({ active }) {
   const [journals, setJournals] = useState([]);
@@ -17,8 +22,12 @@ export default function ArticlesTab({ active }) {
   const [days, setDays] = useStoredState("asap.articleDays", 7);
   const [query, setQuery] = useState("");
   const [picking, setPicking] = useState(false);
+  const [zoomed, setZoomed] = useState(null);       // article whose figure is open in the lightbox
   const [focus, setFocus] = useState(null);      // one journal picked from the strip, or null = all
   const [counts, setCounts] = useState({});
+  const [newCounts, setNewCounts] = useState({});
+  const [view, setView] = useStoredState("asap.articleView", "grid");
+  const [topicCounts, setTopicCounts] = useState(null);
   const q = useDebounced(query.trim());
 
   useEffect(() => {
@@ -38,23 +47,39 @@ export default function ArticlesTab({ active }) {
   // live per-journal counts for the strip (same days / topics / search)
   const countKey = JSON.stringify({ topicIds, days, q });
   useEffect(() => {
-    api.journalCounts({ topics: topicIds, days, q })
-      .then((rows) => setCounts(Object.fromEntries(rows.map((r) => [r.journal_id, r.n]))))
-      .catch(() => setCounts({}));
+    api.journalCounts({ topics: topicIds, days, q, since: baseline })
+      .then((rows) => {
+        setCounts(Object.fromEntries(rows.map((r) => [r.journal_id, r.n])));
+        setNewCounts(Object.fromEntries(rows.map((r) => [r.journal_id, r.new_n || 0])));
+      })
+      .catch(() => { setCounts({}); setNewCounts({}); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [countKey]);
 
+  // live per-topic counts for the chips (current journals or focused journal, days, search)
+  const countJournals = focused !== null ? [focused] : [...selected].sort((a, b) => a - b);
+  const topicCountKey = JSON.stringify({ countJournals, days, q });
+  useEffect(() => {
+    if (!ready || countJournals.length === 0) { setTopicCounts(null); return; }
+    let live = true;
+    api.topicCounts({ journals: countJournals, days, q })
+      .then((rows) => { if (live) setTopicCounts(Object.fromEntries(rows.map((r) => [r.topic_id, r.n]))); })
+      .catch(() => { if (live) setTopicCounts(null); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicCountKey, ready]);
+
   const feed = useFeed(
     api.articles,
-    { journals: focused !== null ? [focused] : [...selected].sort((a, b) => a - b), topics: topicIds, days, q },
+    { journals: focused !== null ? [focused] : [...selected].sort((a, b) => a - b), topics: topicIds, days, q, since: baseline },
     ready && selected.length > 0,
   );
   const stripJournals = journals.filter((j) => selected.includes(j.journal_id));
 
   return (
     <div className="section" hidden={!active}>
-      <header className="section-head">
-        <h2 className="section-title">ASAP Articles</h2>
+      <header className="tab-head">
+        <h2 className="tab-heading">ASAP Articles</h2>
         <div className="divider" aria-hidden="true"><span /></div>
       </header>
       <div className="layout">
@@ -68,7 +93,7 @@ export default function ArticlesTab({ active }) {
             <span className="journal-button-action">Change</span>
           </button>
         </div>
-        <TopicChips topics={topics} selected={topicIds} onChange={setTopicIds} />
+        <TopicChips topics={topics} selected={topicIds} onChange={setTopicIds} counts={topicCounts} />
       </Sidebar>
 
       <section className="results" aria-live="polite">
@@ -84,18 +109,24 @@ export default function ArticlesTab({ active }) {
           </div>
         ) : (
           <>
-          <JournalStrip journals={stripJournals} counts={counts} focus={focused} onFocus={setFocus} />
+          <SinceBar count={feed.newCount} baseline={baseline}>
+            <ViewSwitch value={view === "list" ? "list" : "grid"} onChange={setView} />
+          </SinceBar>
+          <JournalStrip journals={stripJournals} counts={counts} newCounts={newCounts} focus={focused} onFocus={setFocus} />
           <Feed
             feed={feed}
             noun="article"
-            gridClass="article-grid"
+            gridClass={view === "list" ? "article-list" : "article-grid"}
             emptyText="No articles match these filters. Try more days, fewer topics or another search."
-            render={(a) => <ArticleCard key={a.article_id} a={a} />}
+            render={(a) => (
+              <ArticleCard key={a.article_id} a={a} layout={view} isNew={isNewSince(a.first_seen_at, baseline)} onZoom={setZoomed} />
+            )}
           />
           </>
         )}
       </section>
 
+      {zoomed && <Lightbox article={zoomed} onClose={() => setZoomed(null)} />}
       {picking && (
         <JournalPicker
           journals={journals}

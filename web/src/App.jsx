@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, timeAgo } from "./api";
 import { useStoredState } from "./hooks";
-import Hero from "./components/Hero";
+import Banner from "./components/Banner";
+import ThemeToggle from "./components/ThemeToggle";
 import About from "./components/About";
 import ArticlesTab from "./components/ArticlesTab";
 import PatentsTab from "./components/PatentsTab";
@@ -60,12 +61,15 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <p className="refreshed">
-          {status && current.refreshed ? `Updated ${timeAgo(status[current.refreshed])}` : ""}
-        </p>
+        <div className="topbar-end">
+          <p className="refreshed">
+            {status && current.refreshed ? `Updated ${timeAgo(status[current.refreshed])}` : ""}
+          </p>
+          <ThemeToggle />
+        </div>
       </header>
 
-      <Hero status={status} onOpen={open} />
+      <Banner />
 
       <main id="content" className="content">
         <ArticlesTab active={current.id === "articles"} />
@@ -74,9 +78,13 @@ export default function App() {
       </main>
 
       <footer className="site-foot">
-        <p>
-          Articles come from publisher feeds, Crossref and Springer Nature; patents from the European Patent Office.
-          Figures are shown from the publishers' own servers and every card links to the original.
+        <p className="site-credit">
+          © {new Date().getFullYear()} ASAP Chem Hub · Designed and built by{" "}
+          <span className="site-credit-name">Vijayarajan Devannah</span>
+        </p>
+        <p className="site-legal">
+          Articles, abstracts and figures © their publishers; patent data from EPO Open Patent Services.
+          Independent; not affiliated with any publisher or the EPO.
         </p>
       </footer>
     </div>
