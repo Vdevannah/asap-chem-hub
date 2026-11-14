@@ -71,11 +71,13 @@ Database: `docker compose up -d` (must be running).
   keep its page colours in step with `--page`.
 - Split banner under the top bar, the same on every visit (src/components/Banner.jsx; no first-visit
   logic). Left: solid pine panel (`--banner-pine`: `#1f3a33` light, `#0f1714` dark) with "ASAP Chem Hub"
-  (Jost caps) and the one-line tagline (no pills: the top bar has the tabs with counts). Right: web/public/banner.jpg (2100×679, < 300 KB) / banner-small.jpg (1100px, phones),
+  (Jost caps) and the tagline "The newest chemistry papers and patents in one place, by topic. Updated every day." (also the page's meta description; no pills: the top bar has the tabs with counts). Right: web/public/banner.jpg (2100×679, < 300 KB) / banner-small.jpg (1100px, phones),
   alt="" (decorative), AI-generated (credit on the About page), with a soft fade from the panel into it.
   Text uses the light `--banner-*` colours in both themes (all ≥ 7:1 on either pine).
   Sizes (height / panel width / fade / `--banner-focus`): desktop 200px / 40% / 80px / "30% 88%";
   ≤ 960px 200px / 45% / 80px / "20% 80%"; ≤ 700px 140px / 50% / 24px / "29% 80%".
+  The panel column is `minmax(min-content, <split>)`: it grows to fit the title (which never wraps or
+  clips; its size scales with clamp() at each breakpoint) and the tagline wraps instead.
 - Top bar: `--bar-h` 72px (60px at ≤ 600px); scroll-padding and the sticky sidebar's top/max-height derive
   from it, so change the height only there. Wordmark `--step-brand` 20px, tabs `--step-nav` 18px (16px on
   phones), counts 15px (13px on phones, hidden below 360px), 4px active underline, 40px theme button.
@@ -98,6 +100,11 @@ Database: `docker compose up -d` (must be running).
   white, 4px padding). Grid cards are min 340px wide. Clicking a figure opens it in a lightbox
   (src/components/Lightbox.jsx, native modal `<dialog>`: Esc / × / backdrop close, focus returns to the
   figure); the figure itself does not link to the article; the title and the lightbox's "Open article" do.
+- About page (src/components/About.jsx): lede, who it's for, why, live "at a glance" numbers (journals,
+  articles in the last 30 days, WO patents in the last 90, topic count; fetched on first visit to the tab),
+  how it works, the two sections, topics by family, questions, feedback, "Who made it" (plain text, no card). Do not name other
+  websites or products there. The feedback URL lives only in web/src/config.js (`FEEDBACK_URL`), used by
+  the About buttons and the footer "Feedback" link.
 - Each tab starts with a centred `<h2 class="tab-heading">` ("ASAP Articles", "New Patents") in a
   `.tab-head`: Jost caps, 0.06em spacing, 1.5rem (1.2rem on phones), `--heading` colour, with the centred
   `.divider` ornament under it (120px line in `--divider`, small tick in `--muted`); 28px above, 20px

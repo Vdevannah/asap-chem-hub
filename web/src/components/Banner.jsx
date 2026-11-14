@@ -7,7 +7,7 @@ export default function Banner() {
     <section className="banner" aria-labelledby="banner-title">
       <div className="banner-panel">
         <h1 id="banner-title" className="banner-title">ASAP Chem Hub</h1>
-        <p className="banner-tagline">The newest chemistry papers and patents, by topic. Updated every day.</p>
+        <p className="banner-tagline">The newest chemistry papers and patents in one place, by topic. Updated every day.</p>
       </div>
       {/* Decorative (alt=""): the heading already names the site. Phones load the ~1100px version. */}
       <picture className="banner-photo">

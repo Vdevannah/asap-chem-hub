@@ -4,6 +4,7 @@ import { useStoredState } from "./hooks";
 import Banner from "./components/Banner";
 import ThemeToggle from "./components/ThemeToggle";
 import About from "./components/About";
+import { FEEDBACK_URL } from "./config";
 import ArticlesTab from "./components/ArticlesTab";
 import PatentsTab from "./components/PatentsTab";
 
@@ -79,8 +80,13 @@ export default function App() {
 
       <footer className="site-foot">
         <p className="site-credit">
-          © {new Date().getFullYear()} ASAP Chem Hub · Designed and built by{" "}
-          <span className="site-credit-name">Vijayarajan Devannah</span>
+          © {new Date().getFullYear()} ASAP Chem Hub
+          {" · "}
+          <button type="button" className="site-link" onClick={() => open("about")}>About</button>
+          {" · "}
+          <a className="site-link" href={FEEDBACK_URL} target="_blank" rel="noopener noreferrer">
+            Feedback<span className="visually-hidden"> (opens in a new tab)</span>
+          </a>
         </p>
         <p className="site-legal">
           Articles, abstracts and figures © their publishers; patent data from EPO Open Patent Services.
