@@ -1,4 +1,4 @@
-import { groupTopics } from "../topics";
+import { groupTopics, topicLabel } from "../topics";
 
 // Shared sidebar controls: search box, day range, topic chips.
 
@@ -38,9 +38,30 @@ export function DayRange({ options, value, onChange }) {
 }
 
 // counts (optional): { topic_id: n } for the current filters other than topics.
-export function TopicChips({ topics, selected, onChange, counts }) {
+// subgroups: show a family's sub-group headings (Articles tab: "Synthesis" / "Catalysis").
+export function TopicChips({ topics, selected, onChange, counts, subgroups = false }) {
   const toggle = (id) =>
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const chips = (items, inSubgroup) => (
+    <div className="chips">
+      {items.map((t) => {
+        const n = counts ? counts[t.topic_id] || 0 : null;
+        const on = selected.includes(t.topic_id);
+        return (
+          <button
+            key={t.topic_id}
+            type="button"
+            aria-pressed={on}
+            className={"chip" + (on ? " on" : "") + (n === 0 ? " zero" : "")}
+            onClick={() => toggle(t.topic_id)}
+          >
+            {topicLabel(t.name, inSubgroup)}
+            {n !== null && <span className="chip-n">{n.toLocaleString()}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
   return (
     <fieldset className="field">
       <legend className="field-label">
@@ -51,27 +72,17 @@ export function TopicChips({ topics, selected, onChange, counts }) {
           </button>
         )}
       </legend>
-      {groupTopics(topics).map((g) => (
+      {groupTopics(topics, subgroups).map((g) => (
         <div key={g.id} className={`topic-group fam-${g.id}`}>
           <p className="topic-group-name">{g.name}</p>
-          <div className="chips">
-            {g.items.map((t) => {
-              const n = counts ? counts[t.topic_id] || 0 : null;
-              const on = selected.includes(t.topic_id);
-              return (
-                <button
-                  key={t.topic_id}
-                  type="button"
-                  aria-pressed={on}
-                  className={"chip" + (on ? " on" : "") + (n === 0 ? " zero" : "")}
-                  onClick={() => toggle(t.topic_id)}
-                >
-                  {t.name}
-                  {n !== null && <span className="chip-n">{n.toLocaleString()}</span>}
-                </button>
-              );
-            })}
-          </div>
+          {g.subgroups
+            ? g.subgroups.map((s) => (
+                <div key={s.name} className="topic-subgroup" role="group" aria-label={`${g.name}: ${s.name}`}>
+                  <p className="topic-subgroup-name" aria-hidden="true">{s.name}</p>
+                  {chips(s.items, true)}
+                </div>
+              ))
+            : chips(g.items, false)}
         </div>
       ))}
       <p className="hint">{selected.length ? "Showing items in any of the chosen topics." : "All topics."}</p>

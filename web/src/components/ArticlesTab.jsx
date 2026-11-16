@@ -93,7 +93,7 @@ export default function ArticlesTab({ active }) {
             <span className="journal-button-action">Change</span>
           </button>
         </div>
-        <TopicChips topics={topics} selected={topicIds} onChange={setTopicIds} counts={topicCounts} />
+        <TopicChips topics={topics} selected={topicIds} onChange={setTopicIds} counts={topicCounts} subgroups />
       </Sidebar>
 
       <section className="results" aria-live="polite">

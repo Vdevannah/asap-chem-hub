@@ -151,6 +151,6 @@ def parse_documents(xml_text):
             "family_id": doc.get("family-id", ""),
             "published": f"{pub_date[:4]}-{pub_date[4:6]}-{pub_date[6:]}" if len(pub_date) == 8 else "",
             "patent_url": f"https://worldwide.espacenet.com/patent/search?q=pn%3D{pn}",
-            "topics": tag_topics(title, abstract),
+            "topics": tag_topics(title, abstract, patents=True),
         })
     return total, patents

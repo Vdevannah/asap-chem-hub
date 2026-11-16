@@ -19,7 +19,9 @@ Both are filtered by research topic. Owner: Vijayarajan Devannah (GitHub: Vdevan
 ## Layout
 ```
 poc_feeds.py        journal list + feed fetching (RSS, Crossref for RSC/ChemRxiv; ACS Crossref backup by ISSN)
-topics.py           11 shared topic keyword rules (title match = 2, abstract = 1, per-topic thresholds)
+topics.py           16 article topic keyword rules: 11 shared with patents + 5 article-only catalysis sub-topics
+                    (title match = 2, abstract = 1, per-topic thresholds; 'weak' rules need synthesis context,
+                    'exclude' rules drop energy/materials/device papers)
 springer.py         Springer Nature Meta + Open Access API (Nature abstracts, Figure 1)
 epo.py              EPO OPS client: token, rate-limit pacing, 5 WO search streams
 ingest.py           jobs: articles | figures | patents | cleanup | all
@@ -31,6 +33,8 @@ web/                React + Vite site (src/components/*, src/styles.css, src/top
 
 ## Data model (MySQL `asap_chem_hub`)
 - journals, articles (doi UNIQUE, figure_status found/pending/none), article_topics, article_topic_links
+- article_topics: 16 = 11 shared + 5 article-only (Transition metal catalysis, Photoredox and photochemistry,
+  Electrosynthesis, C–H functionalization, Skeletal editing); articles_only topics never go to patents
 - patents (publication_number UNIQUE), patent_topics (14 = 11 shared + ADCs, Antibodies, OLED), patent_topic_links
 - ingestion_runs (log of every job run)
 - Retention: articles 30 days, patents 90 days. Daily patent lookback 28 days (EPO loads WO batches late).
@@ -61,6 +65,11 @@ Database: `docker compose up -d` (must be running).
   - Use base for rings, borders and rules; -ink for text; -soft for tinted backgrounds; -fill for filled
     backgrounds (selected segmented button and chips, NEW badge, primary buttons) with `--on-accent` text.
     -fill is the ink shade in light mode and the base shade in dark mode, to keep text contrast ≥ 4.5:1.
+- Sub-groups (src/topics.js `subgroups`): on the Articles sidebar and the About page the amber family shows two
+  small Jost-caps headings, Synthesis (Synthetic methods, Skeletal editing, Total synthesis) and Catalysis
+  (All catalysis, Transition metal, Photoredox, Electrosynthesis, C–H functionalization, Asymmetric); all chips
+  always visible. "All catalysis" is only a display label (topicLabel) for the stored topic "Catalysis".
+  The Patents tab shows no sub-groups.
 - Articles accent jade, Patents accent amber (`--accent`, `--accent-ring`, `--accent-soft`, `--accent-fill`;
   `.theme-patents` switches them to amber).
 - Dark mode rules: `color-scheme` matches the theme; graphical-abstract tiles (`.figure`) stay on white

@@ -148,6 +148,10 @@ INSERT INTO article_topics (name) VALUES
   ('Computational chemistry and AI'), ('Analytical and physical chemistry');
 
 INSERT INTO patent_topics (name) SELECT name FROM article_topics;   -- same names, separate table
+-- article-only topics (catalysis sub-topics; topics.py marks them articles_only)
+INSERT INTO article_topics (name) VALUES
+  ('Transition metal catalysis'), ('Photoredox and photochemistry'), ('Electrosynthesis'),
+  ('C–H functionalization'), ('Skeletal editing');
 -- patent-only topics (each comes from its own EPO search stream)
 INSERT INTO patent_topics (name) VALUES
   ('Antibody-drug conjugates'), ('Antibodies'), ('OLED materials and devices');

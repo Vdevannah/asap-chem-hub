@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { FAMILIES } from "../topics";
+import { FAMILIES, topicLabel } from "../topics";
 import { FEEDBACK_URL } from "../config";
 
 const AUDIENCE = [
@@ -76,6 +76,16 @@ export default function About({ active }) {
 
   const patentOnly = (name) =>
     articleTopics && patentTopics && !articleTopics.some((t) => t.name === name) && patentTopics.some((t) => t.name === name);
+  const articlesOnly = (name) =>
+    articleTopics && patentTopics && articleTopics.some((t) => t.name === name) && !patentTopics.some((t) => t.name === name);
+  const topicItems = (names, famId, inSubgroup) =>
+    names.map((t) => (
+      <li key={t} className={`fam-${famId}`}>
+        {topicLabel(t, inSubgroup)}
+        {patentOnly(t) && <span className="patent-only"> · patents only</span>}
+        {articlesOnly(t) && <span className="patent-only"> · articles only</span>}
+      </li>
+    ));
 
   const TILES = [
     [n(stats.journals), "Journals"],
@@ -164,13 +174,16 @@ export default function About({ active }) {
           {FAMILIES.map((f) => (
             <div key={f.id} className={`topic-col fam-${f.id}`}>
               <h4>{f.name}</h4>
-              <ul className="card-topics">
-                {f.topics.map((t) => (
-                  <li key={t} className={`fam-${f.id}`}>
-                    {t}{patentOnly(t) && <span className="patent-only"> · patents only</span>}
-                  </li>
-                ))}
-              </ul>
+              {f.subgroups ? (
+                f.subgroups.map((sg) => (
+                  <div key={sg.name} className="topic-col-sub">
+                    <h5>{sg.name}</h5>
+                    <ul className="card-topics">{topicItems(sg.topics, f.id, true)}</ul>
+                  </div>
+                ))
+              ) : (
+                <ul className="card-topics">{topicItems(f.topics, f.id, false)}</ul>
+              )}
             </div>
           ))}
         </div>

@@ -248,6 +248,10 @@ input[type="search"]:focus { border-color: var(--accent-ring); outline: none; bo
 .topic-group + .topic-group { margin-top: 8px; }
 .topic-group-name { margin: 0; font-size: var(--step--1); color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .topic-group-name::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--fam); }
+/* sub-groups inside a family (Articles: "Synthesis" / "Catalysis"): a small caps heading, chips always shown */
+.topic-subgroup { display: flex; flex-direction: column; gap: 6px; padding-left: 14px; }
+.topic-subgroup + .topic-subgroup { margin-top: 4px; }
+.topic-subgroup-name { margin: 0; font: 500 var(--step--2)/1.3 var(--caps); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fam-ink); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   border: 1px solid var(--rule);
@@ -486,6 +490,8 @@ button:disabled { opacity: 0.6; cursor: default; }
 .topic-col .card-topics { gap: 6px; }
 .topic-col .card-topics li { font-family: var(--caps); }
 .patent-only { font-weight: 400; }
+.topic-col-sub + .topic-col-sub { margin-top: 12px; }
+.topic-col-sub h5 { margin: 0 0 6px; font: 500 var(--step--2)/1.3 var(--caps); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fam-ink); }
 
 /* questions */
 .faq { max-width: 72ch; margin: 0 auto; border-top: 1px solid var(--rule); }
