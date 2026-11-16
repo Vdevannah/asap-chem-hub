@@ -80,7 +80,7 @@ Database: `docker compose up -d` (must be running).
   clips; its size scales with clamp() at each breakpoint) and the tagline wraps instead.
 - Top bar: `--bar-h` 72px (60px at ≤ 600px); scroll-padding and the sticky sidebar's top/max-height derive
   from it, so change the height only there. Wordmark `--step-brand` 20px, tabs `--step-nav` 18px (16px on
-  phones), counts 15px (13px on phones, hidden below 360px), 4px active underline, 40px theme button.
+  phones), no counts on the tabs, 4px active underline, 40px theme button.
 - Page column: max 1440px with a `--gutter` side padding. Full-bleed elements (sticky top bar, banner)
   span the window (`margin-inline: calc(50% - 50vw)`) and pad with `--edge-pad` so their content lines up
   with the column. The top bar background is opaque `--page` (nothing shows through when scrolled).

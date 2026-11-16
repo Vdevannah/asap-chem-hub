@@ -132,13 +132,11 @@ button, input { font: inherit; color: inherit; }
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
 }
 .tab:hover, .tab[aria-selected="true"] { color: var(--ink); }
 .tab-articles[aria-selected="true"] { border-bottom-color: var(--jade); }
 .tab-patents[aria-selected="true"] { border-bottom-color: var(--amber); }
 .tab-about[aria-selected="true"] { border-bottom-color: var(--heading); }
-.tab-count { font-size: var(--step-0); color: var(--muted); font-variant-numeric: tabular-nums; }
 .refreshed { margin: 0; color: var(--muted); font-size: var(--step--1); white-space: nowrap; }
 
 .topbar-end { margin-left: auto; display: flex; align-items: center; gap: 16px; }
@@ -617,8 +615,7 @@ sup { vertical-align: baseline; top: -0.45em; }
   :root { --bar-h: 60px; }
   .wordmark { display: none; }
   .tab { font-size: var(--step-ui); }
-  .tab-count { font-size: var(--step--2); }
-  .tabs { gap: 20px; }                      /* 32px overflows a 360px screen */
+  .tabs { gap: 20px; }                      /* tighter spacing on phones */
   .patent-card { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .pc-side { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); padding-top: 12px; }
   .article-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
@@ -637,9 +634,6 @@ sup { vertical-align: baseline; top: -0.45em; }
   .sidebar-body { display: none; }
   .sidebar.open .sidebar-body { display: flex; }
   .article-grid { grid-template-columns: 1fr; }
-}
-@media (max-width: 359px) {
-  .tab-count { display: none; }             /* the smallest phones: tab names only, so the bar fits */
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }

@@ -9,8 +9,8 @@ import ArticlesTab from "./components/ArticlesTab";
 import PatentsTab from "./components/PatentsTab";
 
 const TABS = [
-  { id: "articles", label: "Articles", count: "total_articles", refreshed: "last_refreshed" },
-  { id: "patents", label: "Patents", count: "total_patents", refreshed: "patents_last_refreshed" },
+  { id: "articles", label: "Articles", refreshed: "last_refreshed" },
+  { id: "patents", label: "Patents", refreshed: "patents_last_refreshed" },
   { id: "about", label: "About" },
 ];
 
@@ -58,7 +58,6 @@ export default function App() {
               onClick={() => open(t.id)}
             >
               {t.label}
-              {status && t.count && <span className="tab-count">{Number(status[t.count] || 0).toLocaleString()}</span>}
             </button>
           ))}
         </nav>
