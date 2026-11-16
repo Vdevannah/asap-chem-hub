@@ -149,7 +149,10 @@ TITLE_TAGS = {"sub": "sub", "sup": "sup", "i": "i", "em": "i", "italic": "i"}   
 ANY_TAG_RE = re.compile(r"<(/?)\s*(?:[\w-]+:)?([A-Za-z][\w-]*)\b[^<>]*>")       # tags, any namespace
 DROP_ELEMENT_RE = re.compile(r"<(script|style)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 # ACS sometimes deposits subscripts in Crossref as bold: "CsPbBr\n<b>3</b>". Keep the digits joined.
-BOLD_DIGITS_RE = re.compile(r"(?<=[A-Za-z)\]])\s*<b>\s*(\d+)\s*</b>", re.IGNORECASE)
+# Only right after an element symbol, with no space or just a line break ("CsPbBr\n<b>3</b>"): bold numbers
+# after a word are compound labels ("compound <b>2</b>", "Ni <b>2</b>") and keep their space.
+BOLD_DIGITS_RE = re.compile(r"(?:(?<=[A-Z])|(?<=[A-Z][a-z])|(?<=\)))(?:[^\S\n]*\n\s*)?<b>\s*(\d+)\s*</b>",
+                            re.IGNORECASE)
 
 # Whitespace next to a tag. Crossref pretty-prints every tag on its own line ("Na\n<sub>4</sub>\nFe"),
 # so a newline there says nothing about a real space. Below, "\n" marks such formatting whitespace
@@ -177,7 +180,8 @@ def _before_sub(m):
 def _after_sub(m):
     """Line break after </sub>: join if the next chunk continues the formula ("Ni<sub>3</sub>P@C")."""
     chunk = m.group(1)
-    if FORMULA_CHUNK_RE.fullmatch(chunk) and chunk.lower() not in FUNCTION_WORDS:
+    if FORMULA_CHUNK_RE.fullmatch(chunk) and chunk.lower() not in FUNCTION_WORDS \
+            and re.search(r"[A-Za-z0-9α-ωΑ-Ω]", chunk):              # not a bare "=" ("E<sup>(2)</sup> = 20")
         return chunk
     return " " + chunk
 
@@ -190,8 +194,8 @@ _GAP_FIXES = [
     (re.compile(r"(?<=[-‐‑(\[/′‍])[ \n]+(?=<i>)"), ""),        # "[2,1- <i>a</i>" -> "[2,1-<i>a</i>"
     (re.compile(r"(?<=[,\d])\n(?=<i>[^<]{1,3}</i>)"), ""),          # "2\n<i>H</i>", "α,\n<i>α</i>"
     (re.compile(r"(?<=[A-Z])\n(?=<i>[xyznδ]</i>)"), ""),            # "TiO\n<i>x</i>" -> "TiO<i>x</i>"
-    (re.compile(r"(?<=</i>)\n(?=[^\s(\[<][^\s<(\[]*[\])])"), ""),   # "[<i>a</i>\nn]Daisy", "(<i>E</i>\n)-"
-    (re.compile(END_OF_SUB + r"[ \n]+(?=[-‐‑)\]/,;:]|–\S)"), ""),   # "<sup>2+</sup>\n/Co", "Csp<sup>3</sup> –Csp"
+    (re.compile(r"(?<=</i>)\n(?=[^\s(\[<]{1,3}[\])])"), ""),         # "[<i>a</i>\nn]Daisy" (short chunk only)
+    (re.compile(END_OF_SUB + r"[ \n]+(?=[-‐‑)\]}/,;:]|–\S)"), ""),  # "<sup>2+</sup>\n/Co", "Csp<sup>3</sup> –Csp"
     (re.compile(END_OF_SUB + r"\n([^\s<‐‑–-]+)"), _after_sub),       # "<sub>3</sub>\nP@C", "<sub>2</sub>\ninto"
 ]
 
@@ -204,11 +208,26 @@ def escape_title_text(text: str) -> str:
 
 def clean_title(raw: str) -> str:
     """RSS or Crossref title -> stored title: text with only <sub>, <sup>, <i> kept."""
+    return _clean_markup(raw)
+
+
+def clean_abstract_html(raw: str) -> str:
+    """RSS / Crossref / Springer abstract (HTML or JATS) -> plain text, without the gaps the old
+    tag-stripper left: "CO<sub>2</sub> into" -> "CO2 into", "2<i>H</i>-azirine" -> "2H-azirine".
+    Same rules as titles; then the kept tags are dropped (abstracts are stored as plain text)."""
+    return plain_title(_clean_markup(raw, abstract=True))
+
+
+def _clean_markup(raw: str, abstract: bool = False) -> str:
+    """Shared by titles and abstracts. Abstract mode: every other tag (<p>, <div>, <br>, <img> ...)
+    becomes a space, as in the old stripper, and a blank line is a real break, not formatting."""
     raw = BOLD_DIGITS_RE.sub(r"\1", DROP_ELEMENT_RE.sub(" ", raw or ""))
     out, stack, pos = [], [], 0
 
     def text(chunk):
         chunk = html.unescape(chunk)
+        if abstract:
+            chunk = re.sub(r"\n\s*\n", " ", chunk)                  # paragraph break -> real space
         chunk = re.sub(r"\s*\n\s*", "\n", chunk)                   # formatting whitespace -> "\n"
         chunk = re.sub(r"[^\S\n]+", " ", chunk)                    # real whitespace -> " "
         out.append(escape_title_text(chunk))
@@ -218,6 +237,8 @@ def clean_title(raw: str) -> str:
         pos = m.end()
         tag = TITLE_TAGS.get(m.group(2).lower())
         if not tag:
+            if abstract:
+                out.append(" ")                                    # <p>, <div>, <br>: a word break
             continue                                               # dropped tag: its text stays
         if not m.group(1):
             stack.append(tag)
@@ -410,7 +431,7 @@ def crossref_fill(article: dict, session: requests.Session) -> None:
             parts = (msg.get("published-online") or msg.get("issued") or {}).get("date-parts", [[]])[0]
             article["date"] = "-".join(f"{p:02d}" for p in parts)
         if len(article["abstract"]) <= 100 and msg.get("abstract"):
-            article["abstract"] = strip_html(msg["abstract"])
+            article["abstract"] = clean_abstract_html(msg["abstract"])
             article["topics"] = tag_topics(article['title'], article['abstract'])
         article["source_note"] += " +crossref"
     except (requests.RequestException, ValueError, KeyError):
@@ -466,7 +487,7 @@ def fetch_crossref(name, publisher, crossref_filter, session, days=7, versions=F
         if NOT_A_PAPER.search(plain_title(title)):   # covers, contents lists, corrections
             skipped += 1
             continue
-        abstract = strip_html(it.get("abstract", ""))
+        abstract = clean_abstract_html(it.get("abstract", ""))
         parts = (it.get("published-online") or it.get("posted") or it.get("published")
                  or it.get("created") or {}).get("date-parts", [[]])[0]
         articles.append({
@@ -613,7 +634,7 @@ def fetch_journal(name, publisher, url, session):
                 categories.add(t["term"])
         if e.get("dc_type"):
             categories.add(e["dc_type"])
-        abstract = strip_html(entry_html(e))
+        abstract = clean_abstract_html(entry_html(e))
         title = clean_title(e.get("title", ""))
         articles.append({
             "journal": name,

@@ -8,19 +8,19 @@ Keys come from .env: SPRINGER_META_KEY, SPRINGER_OA_KEY.
 Images are referenced by Springer Nature's own URL, never downloaded.
 """
 
-import html
 import os
 import re
 from urllib.parse import quote
 
 from dotenv import load_dotenv
 
+from poc_feeds import clean_abstract_html
+
 load_dotenv()
 META_KEY = os.environ.get("SPRINGER_META_KEY", "")
 OA_KEY = os.environ.get("SPRINGER_OA_KEY", "")
 META_URL = "https://api.springernature.com/meta/v2/json"
 OA_URL = "https://api.springernature.com/openaccess/jats"
-_TAG = re.compile(r"<[^>]+>")
 
 
 def enabled() -> bool:
@@ -32,8 +32,7 @@ def _clean(text) -> str:
         text = " ".join(_clean(v) for v in text.values())
     elif isinstance(text, list):
         text = " ".join(_clean(v) for v in text)
-    text = html.unescape(_TAG.sub(" ", str(text or "")))
-    return re.sub(r"\s+", " ", text).strip()
+    return clean_abstract_html(str(text or ""))       # same cleaner as RSS / Crossref abstracts
 
 
 def meta_lookup(doi, session):
