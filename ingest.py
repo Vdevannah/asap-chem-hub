@@ -5,7 +5,10 @@ Keeps the database fresh. Four jobs:
 
   articles  fetch every active journal in the `journals` table, add only NEW DOIs,
             fill gaps from Crossref (Nature, Science) and the Springer Meta API,
-            tag topics.                                          -> every 4 hours
+            tag topics. RSS items whose DOI we already have (e.g. from the Crossref
+            backup) fill that article's empty abstract/figure/authors.
+            Then, at most every 6 hours, a Crossref backup for ACS: articles from the
+            last 7 days (by ISSN) that RSS missed, title-only, no figure. -> hourly
   figures   re-check open-access Nature articles marked 'pending' and add
             Figure 1 when Springer has indexed the full text;
             give up after 14 days.                               -> daily
@@ -28,6 +31,7 @@ Usage
 """
 
 import argparse
+import os
 import sys
 import time
 
@@ -48,6 +52,8 @@ FIGURE_RETRY_HOURS = 20     # re-check each pending figure at most once a day
 STALE_DAYS = 14             # warn when a feed's newest article is older than this
 PATENT_LOOKBACK_DAYS = 28   # EPO loads WO batches late, so look back two weeks
 PATENT_OFFICE = "WO"
+CROSSREF_BACKUP_HOURS = 6   # ACS Crossref backup: at most once per this many hours
+CROSSREF_BACKUP_DAYS = 7    # ... looking back this many days (by publication date)
 
 
 # ---------------------------------------------------------------------------
@@ -79,10 +85,18 @@ def job_articles(db, session, only=None):
     cur.execute("SELECT name, topic_id FROM article_topics")
     topic_ids = dict(cur.fetchall())
     cur.execute("SELECT doi FROM articles")
-    known = {row[0] for row in cur.fetchall()}
+    known = {row[0].lower() for row in cur.fetchall()}
+    # Known articles with gaps (e.g. inserted by the Crossref backup): doi -> (has abstract, has figure,
+    # has authors). When RSS brings one of them, fill only the empty fields.
+    cur.execute("""SELECT doi, COALESCE(abstract, '') <> '', COALESCE(image_url, '') <> '',
+                          COALESCE(authors, '') <> ''
+                     FROM articles
+                    WHERE COALESCE(abstract, '') = '' OR COALESCE(image_url, '') = ''
+                       OR COALESCE(authors, '') = ''""")
+    gaps = {row[0].lower(): row[1:] for row in cur.fetchall()}
     cutoff = to_date(time.strftime("%Y-%m-%d", time.gmtime(time.time() - ARTICLE_DAYS * 86400)))
 
-    seen = new = 0
+    seen = new = filled = 0
     failed, stale = [], []
     windows = []                              # per feed: "name count@oldest", to spot feeds whose window
                                               # is shorter than the polling interval
@@ -111,7 +125,11 @@ def job_articles(db, session, only=None):
         added = 0
         for a in items:
             seen += 1
-            if not a["doi"] or a["doi"] in known:
+            if not a["doi"]:
+                continue
+            if a["doi"].lower() in known:
+                if a["doi"].lower() in gaps and fill_gaps(cur, a, gaps.pop(a["doi"].lower()), topic_ids):
+                    filled += 1
                 continue
             published = to_date(a["date"])
             if published < cutoff:            # older than the window - cleanup would delete it
@@ -140,7 +158,7 @@ def job_articles(db, session, only=None):
                 (a["doi"], journal_id, a["title"][:1000], a["authors"], abstract,
                  a["link"] or f"https://doi.org/{a['doi']}", published,
                  image, "feed" if image else None, status, is_oa))
-            known.add(a["doi"])
+            known.add(a["doi"].lower())
             if cur.rowcount == 0:
                 continue
             article_id = cur.lastrowid
@@ -158,11 +176,116 @@ def job_articles(db, session, only=None):
         time.sleep(1)                         # be polite to publishers
 
     status = "failed" if journals and len(failed) == len(journals) else ("partial" if failed or stale else "success")
-    notes = "; ".join(failed + [f"stale: {x}" for x in stale] + ["windows: " + " | ".join(windows)])
+    notes = "; ".join(failed + [f"stale: {x}" for x in stale] + [f"filled: {filled}"] +
+                      ["windows: " + " | ".join(windows)])
     finish_run(db, run_id, status, seen, new, notes=notes)
-    print(f"articles: {new} new of {seen} seen, {len(failed)} feed(s) failed, {len(stale)} stale -> {status}")
+    print(f"articles: {new} new of {seen} seen, {filled} filled in, {len(failed)} feed(s) failed, "
+          f"{len(stale)} stale -> {status}")
     if stale:
         print("  stale feeds (check their URL): " + ", ".join(stale))
+    if not only or "acs" in only:
+        new += job_crossref_backup(db, session, topic_ids, cutoff)
+    return new
+
+
+def fill_gaps(cur, a, have, topic_ids):
+    """RSS item for an article we already have (e.g. from the Crossref backup): fill its empty
+    abstract, figure and authors. Never overwrites a non-empty field. Returns True if it changed."""
+    has_abstract, has_image, has_authors = have
+    abstract = clean_abstract(a["abstract"]) if not has_abstract else ""
+    image = a["image_url"] if not has_image else ""
+    authors = a["authors"] if not has_authors else ""
+    if not (abstract or image or authors):
+        return False
+    # MySQL applies SET left to right, so image_source and figure_status are set before image_url
+    cur.execute(
+        """UPDATE articles
+              SET abstract      = IF(COALESCE(abstract, '') = '', %s, abstract),
+                  authors       = IF(COALESCE(authors, '') = '', %s, authors),
+                  image_source  = IF(COALESCE(image_url, '') = '' AND %s IS NOT NULL, 'feed', image_source),
+                  figure_status = IF(COALESCE(image_url, '') = '' AND %s IS NOT NULL, 'found', figure_status),
+                  image_url     = IF(COALESCE(image_url, '') = '', %s, image_url)
+            WHERE doi = %s""",
+        (abstract or None, authors or None, image or None, image or None, image or None, a["doi"]))
+    if cur.rowcount == 0:
+        return False
+    if abstract:                              # the abstract may add topics (title tags stay valid)
+        cur.execute("SELECT article_id FROM articles WHERE doi = %s", (a["doi"],))
+        article_id = cur.fetchone()[0]
+        for topic in tag_topics(a["title"], abstract):
+            if topic in topic_ids:
+                cur.execute("INSERT IGNORE INTO article_topic_links (article_id, topic_id) VALUES (%s, %s)",
+                            (article_id, topic_ids[topic]))
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Job 1b: Crossref backup for ACS (runs inside the articles job, at most every 6 hours)
+# ---------------------------------------------------------------------------
+def job_crossref_backup(db, session, topic_ids, cutoff):
+    """ACS RSS lists only the last few days, so papers can slip past between polls. Add the ones
+    Crossref knows (by ISSN, last 7 days) that we don't have, without abstract or figure; RSS fills
+    those in if it brings the paper later (fill_gaps)."""
+    cur = db.cursor()
+    cur.execute("""SELECT 1 FROM ingestion_runs
+                    WHERE job = 'crossref_acs' AND status IN ('success', 'partial')
+                      AND started_at > NOW() - INTERVAL %s HOUR LIMIT 1""", (CROSSREF_BACKUP_HOURS,))
+    if cur.fetchone():
+        print(f"crossref backup: skipped (last run under {CROSSREF_BACKUP_HOURS} hours ago)")
+        return 0
+    run_id = start_run(db, "crossref_acs")
+    mailto = os.environ.get("CROSSREF_MAILTO", "").strip()
+    if not mailto:
+        print("crossref backup: CROSSREF_MAILTO not set in .env - using Crossref's public pool")
+    cur.execute("SELECT journal_id, name FROM journals WHERE is_active AND publisher = 'ACS'")
+    journals = cur.fetchall()
+    cur.execute("SELECT doi FROM articles")
+    known = {row[0].lower() for row in cur.fetchall()}
+
+    seen = new = 0
+    notes, failed = [], []
+    for journal_id, name in journals:
+        issns = feeds.ACS_ISSNS.get(name)
+        if not issns:
+            failed.append(f"{name}: no ISSN in poc_feeds.ACS_ISSNS")
+            continue
+        print(f"  crossref {name:28s}", end=" ", flush=True)
+        items, err, _ = feeds.fetch_crossref_by_issn(issns, session, CROSSREF_BACKUP_DAYS, mailto)
+        if err:
+            failed.append(f"{name}: {err}")
+            print("FAILED")
+            continue
+        added = 0
+        for a in items:
+            published = to_date(a["date"])
+            # a future date is a bad deposit (seen: JACS 'published-online' 2026-12-31 in November);
+            # skip it - RSS brings the paper with its real date
+            if a["doi"].lower() in known or not a["date"] or not cutoff <= published <= date.today():
+                continue
+            cur.execute(
+                """INSERT IGNORE INTO articles
+                     (doi, journal_id, title, authors, abstract, article_url, published_date, figure_status)
+                   VALUES (%s, %s, %s, %s, NULL, %s, %s, 'none')""",
+                (a["doi"], journal_id, a["title"][:1000], a["authors"] or None, a["link"], published))
+            known.add(a["doi"].lower())
+            if cur.rowcount == 0:
+                continue
+            article_id = cur.lastrowid
+            for topic in tag_topics(a["title"]):      # title only: Crossref has no ACS abstracts
+                if topic in topic_ids:
+                    cur.execute("INSERT IGNORE INTO article_topic_links (article_id, topic_id) VALUES (%s, %s)",
+                                (article_id, topic_ids[topic]))
+            added += 1
+        db.commit()
+        seen += len(items)
+        new += added
+        notes.append(f"{name} crossref_seen={len(items)} crossref_new={added}")
+        print(f"{len(items):4d} in Crossref, {added:3d} new")
+        time.sleep(0.5)
+
+    status = "failed" if len(failed) == len(journals) else ("partial" if failed else "success")
+    finish_run(db, run_id, status, seen, new, notes="; ".join(failed + notes))
+    print(f"crossref backup: {new} new of {seen} seen, {len(failed)} journal(s) failed -> {status}")
     return new
 
 

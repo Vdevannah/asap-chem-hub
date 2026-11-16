@@ -18,7 +18,7 @@ Both are filtered by research topic. Owner: Vijayarajan Devannah (GitHub: Vdevan
 
 ## Layout
 ```
-poc_feeds.py        journal list + feed fetching (RSS, Crossref for RSC/ChemRxiv)
+poc_feeds.py        journal list + feed fetching (RSS, Crossref for RSC/ChemRxiv; ACS Crossref backup by ISSN)
 topics.py           11 shared topic keyword rules (title match = 2, abstract = 1, per-topic thresholds)
 springer.py         Springer Nature Meta + Open Access API (Nature abstracts, Figure 1)
 epo.py              EPO OPS client: token, rate-limit pacing, 5 WO search streams

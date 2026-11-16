@@ -99,6 +99,26 @@ JOURNALS = [
     ("ChemRxiv",                        "ChemRxiv",        CHEMRXIV),
 ]
 
+# ACS RSS feeds list only the last few days (JACS: sometimes 2 items), so ACS also gets a
+# Crossref backup by ISSN (print, electronic) - see ingest.job_crossref_backup. Checked against
+# api.crossref.org/journals. Wiley stays RSS-only: Crossref dates Wiley papers by their earlier
+# "Accepted Article" version, which would shift them.
+ACS_ISSNS = {
+    "JACS":                   ("0002-7863", "1520-5126"),
+    "ACS Central Science":    ("2374-7943", "2374-7951"),
+    "JACS Au":                ("2691-3704",),
+    "Org. Lett.":             ("1523-7060", "1523-7052"),
+    "J. Org. Chem.":          ("0022-3263", "1520-6904"),
+    "Org. Process Res. Dev.": ("1083-6160", "1520-586X"),
+    "J. Med. Chem.":          ("0022-2623", "1520-4804"),
+    "ACS Med. Chem. Lett.":   ("1948-5875",),
+    "J. Nat. Prod.":          ("0163-3864", "1520-6025"),
+    "ACS Catalysis":          ("2155-5435",),
+    "Organometallics":        ("0276-7333", "1520-6041"),
+    "Chem. Rev.":             ("0009-2665", "1520-6890"),
+    "Acc. Chem. Res.":        ("0001-4842", "1520-4898"),
+}
+
 # 2. Topic rules live in topics.py (shared with tune_topics.py and, later, the app)
 from topics import TOPICS, tag_topics
 
@@ -118,6 +138,21 @@ def strip_html(text: str) -> str:
     """Remove HTML tags and collapse whitespace."""
     text = html.unescape(TAG_RE.sub(" ", text or ""))
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Crossref titles may use JATS (<jats:sub>, <jats:italic>) or MathML. Map the formatting tags to
+# the HTML ones the RSS feeds use, then clean with strip_html exactly like an RSS title, so a
+# Crossref title matches the RSS title of the same paper ("CsPbBr 3", "N -Alkyl").
+JATS_TAGS = {"sub": "sub", "sup": "sup", "italic": "i", "i": "i", "bold": "b", "b": "b"}
+JATS_RE = re.compile(r"<(/?)(?:jats:|mml:)?(\w+)[^>]*>", re.IGNORECASE)
+
+
+def clean_title(raw: str) -> str:
+    """Crossref title -> the same form as an RSS title."""
+    def swap(m):
+        tag = JATS_TAGS.get(m.group(2).lower())
+        return f"<{m.group(1)}{tag}>" if tag else " "
+    return strip_html(JATS_RE.sub(swap, raw or ""))
 
 
 def entry_html(entry) -> str:
@@ -276,6 +311,66 @@ def fetch_crossref(name, publisher, crossref_filter, session, days=7, versions=F
     return articles, None, notes
 
 
+def acs_authors(people) -> str:
+    """Crossref author list in the ACS RSS style: 'A, B, and C' / 'A and B'."""
+    names = [(p.get("name") or f"{p.get('given', '')} {p.get('family', '')}").strip() for p in people]
+    names = [n for n in names if n]
+    if len(names) <= 2:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + ", and " + names[-1]
+
+
+def fetch_crossref_by_issn(issns, session, days=7, mailto=""):
+    """Journal articles published in the last `days` days, by ISSN (Crossref works API).
+
+    Returns (articles, error, crossref_count). Articles have no abstract and no figure.
+    The mailto goes only in the User-Agent header, so it never appears in a URL or error message.
+    """
+    since = time.strftime("%Y-%m-%d", time.gmtime(time.time() - days * 86400))
+    params = {"filter": ",".join(f"issn:{i}" for i in issns) + f",from-pub-date:{since},type:journal-article",
+              "rows": 100, "cursor": "*"}
+    headers = {"Accept": "application/json",
+               "User-Agent": "ASAPChemHub/1.0" + (f" (mailto:{mailto})" if mailto else "")}
+    items = []
+    try:
+        for _ in range(20):                       # up to 2,000 works
+            for attempt in range(3):              # Crossref sometimes answers 429/5xx: back off, retry
+                r = session.get("https://api.crossref.org/works", params=params, headers=headers, timeout=60)
+                if r.status_code not in (429, 500, 502, 503, 504):
+                    break
+                time.sleep(5 * (attempt + 1))
+            r.raise_for_status()
+            msg = r.json()["message"]
+            items.extend(msg["items"])
+            if len(msg["items"]) < params["rows"] or not msg.get("next-cursor"):
+                break
+            params["cursor"] = msg["next-cursor"]
+            time.sleep(0.5)
+    except (requests.RequestException, ValueError, KeyError) as e:
+        if not items:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            return None, f"Crossref failed: {type(e).__name__}" + (f" {code}" if code else ""), 0
+
+    articles = []
+    for it in items:
+        title = clean_title(" ".join(it.get("title", [])))
+        if not title or not it.get("DOI") or NOT_A_PAPER.search(title):
+            continue
+        parts = []
+        for key in ("published-online", "published-print", "issued", "created"):
+            parts = (it.get(key) or {}).get("date-parts", [[]])[0] or []
+            if len(parts) == 3:
+                break
+        articles.append({
+            "title": title,
+            "authors": acs_authors(it.get("author", [])),
+            "date": "-".join(f"{p:02d}" for p in parts),
+            "doi": it["DOI"],
+            "link": f"https://doi.org/{it['DOI']}",
+        })
+    return articles, None, len(items)
+
+
 def fetch_chemrxiv(name, publisher, url, session):
     """ChemRxiv blocks scripts on its own API, so preprints come from Crossref."""
     return fetch_crossref(name, publisher, "prefix:10.26434,type:posted-content", session, versions=True)
@@ -289,7 +384,8 @@ NON_RESEARCH = re.compile(r"\b(news|editorial|career|correction|retraction|errat
 NOT_A_PAPER = re.compile(r"^\s*(author correction|publisher correction|correction|corrigendum|"
                          r"retraction|retracted|erratum|addendum|expression of concern|"
                          r"(inside |outside )?(front|back) cover|cover picture|cover feature|"
-                         r"frontispiece|table of contents|contents list|masthead|issue information)\b",
+                         r"frontispiece|table of contents|contents list|masthead|issue information|"
+                         r"issue editorial masthead|issue publication information)\b",
                          re.IGNORECASE)
 
 
