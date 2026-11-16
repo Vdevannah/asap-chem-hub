@@ -35,7 +35,14 @@ CREATE TABLE articles (
     article_id         BIGINT AUTO_INCREMENT PRIMARY KEY,
     doi                VARCHAR(255) NOT NULL UNIQUE,   -- the dedupe key: each run inserts only new DOIs
     journal_id         INT          NOT NULL,
-    title              VARCHAR(1000) NOT NULL,
+    title              VARCHAR(1000) NOT NULL,          -- keeps <sub> <sup> <i> only (poc_feeds.clean_title)
+    -- plain title for keyword search ("CO2" finds CO<sub>2</sub>); MySQL keeps it in step with title
+    title_plain        VARCHAR(1000) GENERATED ALWAYS AS (
+                         REPLACE(REPLACE(REPLACE(
+                         REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(title,
+                           '<sub>', ''), '</sub>', ''), '<sup>', ''), '</sup>', ''), '<i>', ''), '</i>', ''),
+                           '&lt;', '<'), '&gt;', '>'), '&amp;', '&')
+                       ) STORED,
     authors            TEXT,
     abstract           TEXT,                            -- cleaned (no HTML, no ^1,2 markers)
     article_url        VARCHAR(1000),
@@ -57,7 +64,7 @@ CREATE TABLE articles (
     INDEX idx_articles_date          (published_date),
     INDEX idx_articles_journal_date  (journal_id, published_date),   -- "these journals, newest first"
     INDEX idx_articles_figure        (figure_status, figure_checked_at),
-    FULLTEXT INDEX ft_articles       (title, authors, abstract)       -- the keyword search box
+    FULLTEXT INDEX ft_articles       (title_plain, authors, abstract) -- the keyword search box
 );
 
 CREATE TABLE article_topics (
@@ -210,7 +217,7 @@ INSERT INTO journals (name, publisher, picker_group, source_type, feed_url, defa
 --
 -- Keyword search:
 -- SELECT * FROM articles
---  WHERE MATCH(title, authors, abstract) AGAINST ('Suzuki coupling' IN NATURAL LANGUAGE MODE)
+--  WHERE MATCH(title_plain, authors, abstract) AGAINST ('Suzuki coupling' IN NATURAL LANGUAGE MODE)
 --  LIMIT 50;
 --
 -- Open-access Nature articles whose figure should be re-checked today:

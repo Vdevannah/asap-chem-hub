@@ -1,12 +1,15 @@
-// Publisher titles and abstracts carry a little markup: CsPbBr<sub>3</sub>, <i>in vivo</i>, 10<sup>-3</sup>.
-// Keep only these safe tags and render them as React elements; everything else becomes plain text.
-const ALLOWED = { SUB: "sub", SUP: "sup", I: "i", EM: "i", B: "b", STRONG: "b" };
+// Titles keep a little chemical markup: CsPbBr<sub>3</sub>, <i>in vivo</i>, 10<sup>-3</sup>
+// (cleaned at ingestion by poc_feeds.clean_title). Render exactly these three tags as React elements;
+// any other element becomes its plain text, so no other HTML (attributes, links, scripts) ever renders.
+// The input is parsed by DOMParser into an inert document (no scripts run, no images load).
+const ALLOWED = { SUB: "sub", SUP: "sup", I: "i" };
 
 function convert(node, key) {
   if (node.nodeType === Node.TEXT_NODE) {
     return node.textContent.replace(/\s+/g, " ");
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
+  if (["SCRIPT", "STYLE", "TEMPLATE"].includes(node.tagName)) return null;   // never show their source
   const children = convertChildren(node);
   const tag = ALLOWED[node.tagName];
   return tag ? <Tag key={key} tag={tag}>{children}</Tag> : <span key={key}>{children}</span>;

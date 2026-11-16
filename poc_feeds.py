@@ -140,19 +140,194 @@ def strip_html(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-# Crossref titles may use JATS (<jats:sub>, <jats:italic>) or MathML. Map the formatting tags to
-# the HTML ones the RSS feeds use, then clean with strip_html exactly like an RSS title, so a
-# Crossref title matches the RSS title of the same paper ("CsPbBr 3", "N -Alkyl").
-JATS_TAGS = {"sub": "sub", "sup": "sup", "italic": "i", "i": "i", "bold": "b", "b": "b"}
-JATS_RE = re.compile(r"<(/?)(?:jats:|mml:)?(\w+)[^>]*>", re.IGNORECASE)
+# ---------------------------------------------------------------------------
+# Titles: one cleaner for RSS and Crossref. A stored title is a small HTML fragment that keeps
+# only <sub>, <sup> and <i> (the website renders exactly these via RichText); every other tag
+# and every attribute is dropped, and < > in the text are escaped.
+# ---------------------------------------------------------------------------
+TITLE_TAGS = {"sub": "sub", "sup": "sup", "i": "i", "em": "i", "italic": "i"}   # JATS: jats:sub ...
+ANY_TAG_RE = re.compile(r"<(/?)\s*(?:[\w-]+:)?([A-Za-z][\w-]*)\b[^<>]*>")       # tags, any namespace
+DROP_ELEMENT_RE = re.compile(r"<(script|style)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+# ACS sometimes deposits subscripts in Crossref as bold: "CsPbBr\n<b>3</b>". Keep the digits joined.
+BOLD_DIGITS_RE = re.compile(r"(?<=[A-Za-z)\]])\s*<b>\s*(\d+)\s*</b>", re.IGNORECASE)
+
+# Whitespace next to a tag. Crossref pretty-prints every tag on its own line ("Na\n<sub>4</sub>\nFe"),
+# so a newline there says nothing about a real space. Below, "\n" marks such formatting whitespace
+# and " " a real space; the rules decide which formatting gaps are real word breaks.
+FUNCTION_WORDS = {"a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "is", "its", "of", "on",
+                  "or", "over", "per", "than", "the", "to", "under", "via", "vs", "with"}
+# text that continues a formula after a subscript: element symbols, numbers, @ / = ] } ... and no
+# lowercase word ("P@C", "EtP", "Se", "O", "Gd]", "1.5", "=O", "β", "CN"; not "into", "MOFs")
+ELEMENTS = ("H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se "
+            "Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy "
+            "Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm "
+            # common groups written like elements: Me Et Pr Bu Ph Ar Ac Ts Bz Bn Cy Cp Tf Ms Py
+            "Me Et Bu Ph Ts Bz Bn Cy Cp Tf Ms Py").split()
+_ELEMENT = "|".join(sorted(ELEMENTS, key=len, reverse=True))
+FORMULA_CHUNK_RE = re.compile(rf"(?:{_ELEMENT}|[A-Z]|\d+(?:\.\d+)?|[α-ωΑ-Ω]|[@/=·+−()\[\]{{}}’′,:;.*])+")
+END_OF_SUB = r"(?:(?<=</sub>)|(?<=</sup>)|(?<=</sub></i>)|(?<=</sup></i>))"
+
+
+def _before_sub(m):
+    """Space before <sub>/<sup>: a stray gap ("CsPbBr <sub>3") unless after a word ("by <sup>1</sup>")."""
+    word = re.sub(r"<[^>]+>", "", m.group(1))
+    return m.group(1) + (" " if word.lower() in FUNCTION_WORDS else "")
+
+
+def _after_sub(m):
+    """Line break after </sub>: join if the next chunk continues the formula ("Ni<sub>3</sub>P@C")."""
+    chunk = m.group(1)
+    if FORMULA_CHUNK_RE.fullmatch(chunk) and chunk.lower() not in FUNCTION_WORDS:
+        return chunk
+    return " " + chunk
+
+
+_GAP_FIXES = [
+    (re.compile(r"(\S*)[ \n]+(?=(?:<i>)?<su[bp]>)"), _before_sub),  # "CsPbBr <sub>3"  -> "CsPbBr<sub>3"
+    (re.compile(r"(<(?:sub|sup|i)>)[ \n]+"), r"\1"),                # "<i> N"          -> "<i>N"
+    (re.compile(r"[ \n]+(</(?:sub|sup|i)>)"), r"\1"),               # "N </i>"         -> "N</i>"
+    (re.compile(r"(?<=</i>)[ \n]+(?=[-‐‑)\],.;:/′])"), ""),         # "<i>N</i> -Alkyl" -> "<i>N</i>-Alkyl"
+    (re.compile(r"(?<=[-‐‑(\[/′‍])[ \n]+(?=<i>)"), ""),        # "[2,1- <i>a</i>" -> "[2,1-<i>a</i>"
+    (re.compile(r"(?<=[,\d])\n(?=<i>[^<]{1,3}</i>)"), ""),          # "2\n<i>H</i>", "α,\n<i>α</i>"
+    (re.compile(r"(?<=[A-Z])\n(?=<i>[xyznδ]</i>)"), ""),            # "TiO\n<i>x</i>" -> "TiO<i>x</i>"
+    (re.compile(r"(?<=</i>)\n(?=[^\s(\[<][^\s<(\[]*[\])])"), ""),   # "[<i>a</i>\nn]Daisy", "(<i>E</i>\n)-"
+    (re.compile(END_OF_SUB + r"[ \n]+(?=[-‐‑)\]/,;:]|–\S)"), ""),   # "<sup>2+</sup>\n/Co", "Csp<sup>3</sup> –Csp"
+    (re.compile(END_OF_SUB + r"\n([^\s<‐‑–-]+)"), _after_sub),       # "<sub>3</sub>\nP@C", "<sub>2</sub>\ninto"
+]
+
+
+def escape_title_text(text: str) -> str:
+    """Plain text -> safe title text: < > escaped, & only where it would read as an entity."""
+    text = re.sub(r"&(?=#?\w+;)", "&amp;", text)                   # a literal "&lt;" in text stays text
+    return text.replace("<", "&lt;").replace(">", "&gt;")
 
 
 def clean_title(raw: str) -> str:
-    """Crossref title -> the same form as an RSS title."""
-    def swap(m):
-        tag = JATS_TAGS.get(m.group(2).lower())
-        return f"<{m.group(1)}{tag}>" if tag else " "
-    return strip_html(JATS_RE.sub(swap, raw or ""))
+    """RSS or Crossref title -> stored title: text with only <sub>, <sup>, <i> kept."""
+    raw = BOLD_DIGITS_RE.sub(r"\1", DROP_ELEMENT_RE.sub(" ", raw or ""))
+    out, stack, pos = [], [], 0
+
+    def text(chunk):
+        chunk = html.unescape(chunk)
+        chunk = re.sub(r"\s*\n\s*", "\n", chunk)                   # formatting whitespace -> "\n"
+        chunk = re.sub(r"[^\S\n]+", " ", chunk)                    # real whitespace -> " "
+        out.append(escape_title_text(chunk))
+
+    for m in ANY_TAG_RE.finditer(raw):
+        text(raw[pos:m.start()])
+        pos = m.end()
+        tag = TITLE_TAGS.get(m.group(2).lower())
+        if not tag:
+            continue                                               # dropped tag: its text stays
+        if not m.group(1):
+            stack.append(tag)
+            out.append(f"<{tag}>")
+        elif tag in stack:                                         # close it (and anything left open inside)
+            while stack:
+                t = stack.pop()
+                out.append(f"</{t}>")
+                if t == tag:
+                    break
+    text(raw[pos:])
+    out.extend(f"</{t}>" for t in reversed(stack))                 # close anything left open
+
+    title = "".join(out)
+    title = re.sub(r"<(sub|sup|i)>([ \n]*)</\1>", r"\2", title)    # empty tags
+    for pattern, repl in _GAP_FIXES:
+        title = pattern.sub(repl, title)
+    return re.sub(r"\s+", " ", title).strip()
+
+
+def plain_title(title: str) -> str:
+    """Stored title -> plain text (topic tagging, filters, duplicate checks)."""
+    return html.unescape(re.sub(r"</?(?:sub|sup|i)>", "", title or ""))
+
+
+KEPT_TAG_RE = re.compile(r"<(?:sub|sup|i)>")
+_KEPT_SPLIT_RE = re.compile(r"(</?(?:sub|sup|i)>)")
+
+
+def text_key(title):
+    """Title text for 'same title?' checks: no tags, case, spaces or punctuation."""
+    return re.sub(r"\W+", "", plain_title(title).lower())
+
+
+def spaced_like(new, stored):
+    """`new` (cleaned Crossref title) with the word spacing of `stored` (a tagless RSS title).
+    Returns None when the two texts don't line up character by character."""
+    items, gap = [], False                      # items: ["tag", "<sub>"] or ["ch", c, cleaner_space]
+    for part in _KEPT_SPLIT_RE.split(new):
+        if _KEPT_SPLIT_RE.fullmatch(part):
+            items.append(["tag", part])
+            continue
+        for ch in html.unescape(part):
+            if ch.isspace():
+                gap = True
+            else:
+                items.append(["ch", ch, gap])
+                gap = False
+    chars = [it for it in items if it[0] == "ch"]
+
+    stored = plain_title(stored)
+    j = 0                                       # line the characters up with the stored title
+    for it in chars:
+        space = False
+        while j < len(stored) and stored[j].isspace():
+            space, j = True, j + 1
+        if j >= len(stored) or stored[j] != it[1]:
+            return None
+        it.append(space)                        # it[3]: the stored title has a space before this char
+        j += 1
+    if stored[j:].strip():
+        return None
+
+    # a tagged span with stored spaces on BOTH sides was a gap left by the old tag stripper:
+    # use the cleaner's spacing at its two edges
+    untrusted = set()                           # ids of chars whose space comes from the cleaner
+    for k, it in enumerate(items):
+        if it[0] != "tag" or it[1].startswith("</"):
+            continue
+        close, depth, first, after = "</" + it[1][1:], 0, None, None
+        for n in range(k, len(items)):
+            m = items[n]
+            if m[0] == "ch":
+                first = first or m
+            elif m[1] == it[1]:
+                depth += 1
+            elif m[1] == close:
+                depth -= 1
+                if depth == 0:
+                    after = next((x for x in items[n + 1:] if x[0] == "ch"), None)
+                    break
+        if first and (first[3] or first is chars[0]) and (after is None or after[3]):
+            untrusted.update(id(x) for x in (first, after) if x)
+
+    out, tags = [], []
+    for it in items:
+        if it[0] == "tag":
+            tags.append(it[1])
+            continue
+        space = it[2] if id(it) in untrusted else it[3]
+        if out and space:                       # the space goes outside the tags between two chars
+            closing = [t for t in tags if t.startswith("</")]
+            out += closing + [" "] + [t for t in tags if not t.startswith("</")]
+        else:
+            out += tags
+        tags = []
+        out.append(escape_title_text(it[1]))
+    return "".join(out + tags)
+
+
+def upgrade_title(stored: str, crossref: str):
+    """Formatted title for an article stored WITHOUT tags (e.g. from ACS RSS), or None.
+
+    `crossref` is a cleaned Crossref title. It replaces `stored` only when it adds <sub>/<sup>/<i>
+    and is the same text (text_key); the spacing comes from `stored` where it lines up (spaced_like).
+    Same rules as scripts/refresh_titles.py."""
+    if KEPT_TAG_RE.search(stored) or not KEPT_TAG_RE.search(crossref) or text_key(crossref) != text_key(stored):
+        return None
+    new = spaced_like(crossref, stored) or crossref
+    return new if new != stored else None
 
 
 def entry_html(entry) -> str:
@@ -283,12 +458,12 @@ def fetch_crossref(name, publisher, crossref_filter, session, days=7, versions=F
 
     articles, titles, skipped = [], set(), 0
     for it in items:
-        title = strip_html(" ".join(it.get("title", [])))
-        key = re.sub(r"\W+", "", title.lower())
+        title = clean_title(" ".join(it.get("title", [])))
+        key = re.sub(r"\W+", "", plain_title(title).lower())
         if not title or key in titles:            # same work under two DOIs
             continue
         titles.add(key)
-        if NOT_A_PAPER.search(title):             # covers, contents lists, corrections
+        if NOT_A_PAPER.search(plain_title(title)):   # covers, contents lists, corrections
             skipped += 1
             continue
         abstract = strip_html(it.get("abstract", ""))
@@ -354,7 +529,7 @@ def fetch_crossref_by_issn(issns, session, days=7, mailto=""):
     articles = []
     for it in items:
         title = clean_title(" ".join(it.get("title", [])))
-        if not title or not it.get("DOI") or NOT_A_PAPER.search(title):
+        if not title or not it.get("DOI") or NOT_A_PAPER.search(plain_title(title)):
             continue
         parts = []
         for key in ("published-online", "published-print", "issued", "created"):
@@ -391,7 +566,7 @@ NOT_A_PAPER = re.compile(r"^\s*(author correction|publisher correction|correctio
 
 def is_research(name, e) -> bool:
     """Drop corrections, covers etc. everywhere; keep only research from Nature/Science."""
-    if NOT_A_PAPER.search(strip_html(e.get("title", ""))):
+    if NOT_A_PAPER.search(plain_title(clean_title(e.get("title", "")))):
         return False
     if name == "Nature":
         # Nature research papers have DOIs s41586-...; news and comment are d41586-...
@@ -439,7 +614,7 @@ def fetch_journal(name, publisher, url, session):
         if e.get("dc_type"):
             categories.add(e["dc_type"])
         abstract = strip_html(entry_html(e))
-        title = strip_html(e.get("title", ""))
+        title = clean_title(e.get("title", ""))
         articles.append({
             "journal": name,
             "publisher": publisher,
@@ -488,7 +663,7 @@ def write_preview(articles, path="preview.html"):
           <div class="fig">{img}</div>
           <div class="meta">
             <div class="j">{html.escape(a['journal'])} · {html.escape(a['date'])}</div>
-            <a href="{href}" target="_blank">{html.escape(a['title'])}</a>
+            <a href="{href}" target="_blank">{a['title']}</a>
             <div class="au">{html.escape(a['authors'])}</div>
             <div>{tags}</div>
           </div>

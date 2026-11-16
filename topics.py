@@ -19,6 +19,7 @@ How tagging works
 To tune: edit the lists below, then run  python tune_topics.py
 """
 
+import html
 import re
 
 D = r"[–—‐-]"  # any dash used by publishers
@@ -164,6 +165,7 @@ _RULES = {
        [re.compile(p) for p in cfg.get("acronyms", [])]
     for t, cfg in TOPICS.items()
 }
+_TITLE_TAG_RE = re.compile(r"</?(?:sub|sup|i)>")
 THRESHOLD = 2   # default abstract score needed; a topic can set its own "threshold"
 
 
@@ -173,7 +175,8 @@ def threshold_for(topic: str) -> int:
 
 def explain(title: str, abstract: str = "") -> dict:
     """{topic: (score, [matched words])} for every topic that matched anything."""
-    title, abstract = title or "", abstract or ""
+    # stored titles keep <sub>/<sup>/<i> (see poc_feeds.clean_title): match on the plain text
+    title, abstract = html.unescape(_TITLE_TAG_RE.sub("", title or "")), abstract or ""
     out = {}
     for topic, rules in _RULES.items():
         score, hits = 0, []

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { formatDate } from "../api";
+import { formatDate, plainText } from "../api";
 import RichText from "./RichText";
 
 // Enlarged graphical abstract in a modal <dialog>. Esc, the × button or a click on the backdrop closes it;
@@ -27,7 +27,7 @@ export default function Lightbox({ article: a, onClose }) {
           ×
         </button>
         <div className="lightbox-tile">
-          <img src={a.image_url} alt={`Graphical abstract: ${a.title.replace(/<[^>]+>/g, "")}`} referrerPolicy="no-referrer" />
+          <img src={a.image_url} alt={`Graphical abstract: ${plainText(a.title)}`} referrerPolicy="no-referrer" />
         </div>
         <div className="lightbox-caption">
           <p id="lightbox-title" className="lightbox-title"><RichText html={a.title} /></p>

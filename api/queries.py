@@ -31,7 +31,8 @@ def build_article_filters(journal_ids=None, topic_ids=None, days=30, q=None):
         params += list(topic_ids)
     term = clean_search(q)
     if term:
-        where.append("MATCH(a.title, a.authors, a.abstract) AGAINST (%s IN NATURAL LANGUAGE MODE)")
+        # title_plain: the title without <sub>/<sup>/<i>, so "CO2" finds CO<sub>2</sub> (add_title_plain.sql)
+        where.append("MATCH(a.title_plain, a.authors, a.abstract) AGAINST (%s IN NATURAL LANGUAGE MODE)")
         params.append(term)
     return " AND ".join(where), params
 

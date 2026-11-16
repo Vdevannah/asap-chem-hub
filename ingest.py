@@ -225,7 +225,11 @@ def fill_gaps(cur, a, have, topic_ids):
 def job_crossref_backup(db, session, topic_ids, cutoff):
     """ACS RSS lists only the last few days, so papers can slip past between polls. Add the ones
     Crossref knows (by ISSN, last 7 days) that we don't have, without abstract or figure; RSS fills
-    those in if it brings the paper later (fill_gaps)."""
+    those in if it brings the paper later (fill_gaps).
+    ACS RSS titles carry no formatting ("CO2"), Crossref's do (CO<sub>2</sub>): for ACS papers we
+    already have with a tagless title, take Crossref's formatted title when it is the same text
+    (poc_feeds.upgrade_title - the same rules as scripts/refresh_titles.py). title_plain follows
+    automatically (generated column)."""
     cur = db.cursor()
     cur.execute("""SELECT 1 FROM ingestion_runs
                     WHERE job = 'crossref_acs' AND status IN ('success', 'partial')
@@ -241,8 +245,12 @@ def job_crossref_backup(db, session, topic_ids, cutoff):
     journals = cur.fetchall()
     cur.execute("SELECT doi FROM articles")
     known = {row[0].lower() for row in cur.fetchall()}
+    # ACS titles without <sub>/<sup>/<i>: candidates for a formatted title. doi -> (article_id, title)
+    cur.execute("""SELECT a.doi, a.article_id, a.title FROM articles a JOIN journals j USING (journal_id)
+                    WHERE j.publisher = 'ACS' AND a.title NOT REGEXP '<(sub|sup|i)>'""")
+    plain = {doi.lower(): (article_id, title) for doi, article_id, title in cur.fetchall()}
 
-    seen = new = 0
+    seen = new = upgraded_total = 0
     notes, failed = [], []
     for journal_id, name in journals:
         issns = feeds.ACS_ISSNS.get(name)
@@ -255,8 +263,16 @@ def job_crossref_backup(db, session, topic_ids, cutoff):
             failed.append(f"{name}: {err}")
             print("FAILED")
             continue
-        added = 0
+        added = upgraded = 0
         for a in items:
+            if a["doi"].lower() in plain:             # we have it with a tagless title
+                article_id, stored = plain.pop(a["doi"].lower())
+                title = feeds.upgrade_title(stored, a["title"])
+                if title:
+                    cur.execute("UPDATE articles SET title = %s WHERE article_id = %s AND title = %s",
+                                (title[:1000], article_id, stored))
+                    upgraded += cur.rowcount
+                continue
             published = to_date(a["date"])
             # a future date is a bad deposit (seen: JACS 'published-online' 2026-12-31 in November);
             # skip it - RSS brings the paper with its real date
@@ -279,13 +295,16 @@ def job_crossref_backup(db, session, topic_ids, cutoff):
         db.commit()
         seen += len(items)
         new += added
-        notes.append(f"{name} crossref_seen={len(items)} crossref_new={added}")
-        print(f"{len(items):4d} in Crossref, {added:3d} new")
+        upgraded_total += upgraded
+        notes.append(f"{name} crossref_seen={len(items)} crossref_new={added} titles_upgraded={upgraded}")
+        print(f"{len(items):4d} in Crossref, {added:3d} new, {upgraded:3d} titles upgraded")
         time.sleep(0.5)
 
     status = "failed" if len(failed) == len(journals) else ("partial" if failed else "success")
-    finish_run(db, run_id, status, seen, new, notes="; ".join(failed + notes))
-    print(f"crossref backup: {new} new of {seen} seen, {len(failed)} journal(s) failed -> {status}")
+    finish_run(db, run_id, status, seen, new,
+               notes="; ".join(failed + [f"titles_upgraded={upgraded_total}"] + notes))
+    print(f"crossref backup: {new} new of {seen} seen, {upgraded_total} titles upgraded, "
+          f"{len(failed)} journal(s) failed -> {status}")
     return new
 
 
