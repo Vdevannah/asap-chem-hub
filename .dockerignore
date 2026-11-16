@@ -1,0 +1,17 @@
+# Allow-list: the jobs image gets only these files. Never .env, .venv, logs, data exports,
+# web/, infra/ or local tools.
+*
+!requirements-jobs.txt
+!db_connect.py
+!load_poc.py
+!topics.py
+!poc_feeds.py
+!epo.py
+!springer.py
+!ingest.py
+!retag_topics.py
+!scripts/db_transfer.py
+!scripts/import_db.py
+!scripts/refresh_titles.py
+!scripts/refresh_abstracts.py
+!jobs/run_job.sh

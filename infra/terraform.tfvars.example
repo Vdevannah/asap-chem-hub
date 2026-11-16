@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) to override defaults.
+# jobs_image_tag     = "2026-11-16-abc1234"
+# schedules_enabled  = true            # after the data migration is verified
+# lambda_reserved_concurrency = -1     # if the account's total Lambda concurrency is only 10
+# Custom domain later:
+# domain_name         = "asapchemhub.org"
+# acm_certificate_arn = "arn:aws:acm:us-east-1:<account>:certificate/<id>"
+# route53_zone_id     = "Z0123456789ABCDEFGHIJ"

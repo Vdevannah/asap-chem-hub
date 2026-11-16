@@ -1,0 +1,6 @@
+# Ingestion jobs on ECS Fargate (Dockerfile.jobs, python:3.14-slim, arm64). Pinned to tested versions.
+feedparser==6.0.14
+requests==2.34.2
+PyMySQL==1.2.4
+python-dotenv==1.2.4
+boto3==1.44.3          # RDS IAM auth token; S3 download for the one-off import

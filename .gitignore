@@ -10,3 +10,24 @@ epo_results.csv
 preview_patents.html
 .vscode/
 logs/
+
+# --- AWS deployment (infra/) ---
+# Terraform: state lives in S3; local state, plans and caches never committed
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+tfplan*
+*.tfvars
+!*.tfvars.example
+*_override.tf
+# build output (Lambda zip, downloaded RDS CA bundle)
+build/
+*.zip
+global-bundle.pem
+# database exports for the RDS migration (real data)
+exports/
+*.sql.gz
+*.jsonl.gz

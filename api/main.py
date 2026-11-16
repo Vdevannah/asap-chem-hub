@@ -20,6 +20,7 @@ Endpoints
     GET /patents                new WO patents: filters for topics, days (up to 90), search; paging
 """
 
+import os
 from datetime import date, datetime, timezone
 from typing import List, Optional
 
@@ -30,10 +31,15 @@ from pydantic import BaseModel
 from . import queries
 from .db import get_cursor
 
+# DOCS=off (production on AWS): no /docs, /redoc or /openapi.json
+_docs = os.environ.get("DOCS", "on").lower() != "off"
 app = FastAPI(
     title="ASAP Chem Hub API",
     description="ASAP articles and new patents in one place.",
     version="0.1.0",
+    docs_url="/docs" if _docs else None,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
 )
 
 # The React dev server runs on another port, so the browser needs permission (CORS).

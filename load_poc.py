@@ -21,7 +21,6 @@ Usage
 """
 
 import csv
-import os
 import re
 import sys
 from datetime import date
@@ -29,6 +28,7 @@ from datetime import date
 import pymysql
 from dotenv import load_dotenv
 
+import db_connect
 from topics import tag_topics
 
 load_dotenv()
@@ -56,16 +56,9 @@ def to_date(value: str):
 
 
 def connect():
+    """Pipeline connection (autocommit off). Local .env or RDS IAM auth - see db_connect.py."""
     try:
-        return pymysql.connect(
-            host=os.environ.get("DB_HOST", "localhost"),
-            port=int(os.environ.get("DB_PORT", "3306")),
-            user=os.environ.get("DB_USER", "root"),
-            password=os.environ.get("DB_PASSWORD", ""),
-            database=os.environ.get("DB_NAME", "asap_chem_hub"),
-            charset="utf8mb4",
-            autocommit=False,
-        )
+        return db_connect.connect(autocommit=False)
     except pymysql.MySQLError as e:
         sys.exit(f"Could not connect to MySQL: {e}\nCheck DB_* settings in .env and that MySQL is running.")
 

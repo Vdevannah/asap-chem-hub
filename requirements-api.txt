@@ -1,0 +1,8 @@
+# AWS Lambda API (FastAPI behind CloudFront, via Mangum). Python 3.14 (Lambda runtime python3.14).
+# Pinned to the versions tested locally. Built for arm64 by infra/build_lambda.sh.
+fastapi==0.163.1
+pydantic==2.14.3
+mangum==0.22.0
+PyMySQL==1.2.4
+python-dotenv==1.2.4
+boto3==1.44.3          # RDS IAM auth token (the runtime ships boto3 too; pinned for repeatable builds)

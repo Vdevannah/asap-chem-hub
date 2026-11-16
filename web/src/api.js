@@ -1,8 +1,9 @@
-// Talks to the FastAPI backend. Address from VITE_API_URL, default = local API.
+// Talks to the FastAPI backend. Address from VITE_API_URL: the local API by default, "/api" in the
+// production build (web/.env.production), where CloudFront sends /api/* to the Lambda on the same domain.
 const BASE = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
 async function get(path, params = {}) {
-  const url = new URL(BASE + path);
+  const url = new URL(BASE + path, window.location.origin);   // base needed when BASE is relative ("/api")
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) continue;
     url.searchParams.set(k, Array.isArray(v) ? v.join(",") : v);

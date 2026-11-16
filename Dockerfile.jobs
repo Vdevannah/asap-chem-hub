@@ -1,0 +1,26 @@
+# ASAP Chem Hub ingestion jobs for ECS Fargate (linux/arm64).
+# Same Python as the Lambda API (runtime python3.14).
+#   docker buildx build --platform linux/arm64 -f Dockerfile.jobs -t asap-chem-hub-jobs .
+# Commands (see jobs/run_job.sh): articles (articles + figures) | patents | cleanup | import <s3-uri> | <any command>
+FROM python:3.14-slim
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /app
+
+COPY requirements-jobs.txt .
+RUN pip install -r requirements-jobs.txt
+
+# Amazon RDS CA bundle (public), for TLS / IAM auth to RDS. The task definition sets DB_SSL_CA to it;
+# it is not set here, so the image can also run against a local MySQL without TLS.
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/global-bundle.pem
+
+# Only the pipeline code - never .env, data or local tools (see .dockerignore)
+COPY db_connect.py load_poc.py topics.py poc_feeds.py epo.py springer.py ingest.py retag_topics.py ./
+COPY scripts/db_transfer.py scripts/import_db.py scripts/refresh_titles.py scripts/refresh_abstracts.py scripts/
+COPY --chmod=755 jobs/run_job.sh /app/run_job.sh
+
+RUN useradd --create-home --uid 10001 app && mkdir -p /app/logs && chown app /app/logs
+USER app
+
+ENTRYPOINT ["/app/run_job.sh"]
+CMD ["articles"]
