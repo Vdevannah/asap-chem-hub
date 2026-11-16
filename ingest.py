@@ -84,6 +84,8 @@ def job_articles(db, session, only=None):
 
     seen = new = 0
     failed, stale = [], []
+    windows = []                              # per feed: "name count@oldest", to spot feeds whose window
+                                              # is shorter than the polling interval
     for journal_id, name, publisher, url in journals:
         print(f"  {name:28s}", end=" ", flush=True)
         items, err, _ = feeds.fetch_journal(name, publisher, url, session)
@@ -94,6 +96,9 @@ def job_articles(db, session, only=None):
             db.commit()
             print("FAILED")
             continue
+
+        dated = [to_date(a["date"]) for a in items if a.get("date")]
+        windows.append(f"{name} {len(items)}@{min(dated):%m-%d}" if dated else f"{name} {len(items)}@?")
 
         # staleness check: a feed can "work" but stop updating (RSC, June 2026)
         newest = max((to_date(a["date"]) for a in items), default=None)
@@ -153,7 +158,7 @@ def job_articles(db, session, only=None):
         time.sleep(1)                         # be polite to publishers
 
     status = "failed" if journals and len(failed) == len(journals) else ("partial" if failed or stale else "success")
-    notes = "; ".join(failed + [f"stale: {x}" for x in stale])
+    notes = "; ".join(failed + [f"stale: {x}" for x in stale] + ["windows: " + " | ".join(windows)])
     finish_run(db, run_id, status, seen, new, notes=notes)
     print(f"articles: {new} new of {seen} seen, {len(failed)} feed(s) failed, {len(stale)} stale -> {status}")
     if stale:
