@@ -13,6 +13,9 @@ RUN pip install -r requirements-jobs.txt
 # Amazon RDS CA bundle (public), for TLS / IAM auth to RDS. The task definition sets DB_SSL_CA to it;
 # it is not set here, so the image can also run against a local MySQL without TLS.
 ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/global-bundle.pem
+# ADD --chmod also applies 644 to the /app/certs directory it creates, and without the x bit uid 10001
+# can't reach the bundle (PermissionError in ssl.load_verify_locations). Directory 755, file 644, both root-owned.
+RUN chmod 755 /app/certs && chmod 644 /app/certs/global-bundle.pem
 
 # Only the pipeline code - never .env, data or local tools (see .dockerignore)
 COPY db_connect.py load_poc.py topics.py poc_feeds.py epo.py springer.py ingest.py retag_topics.py ./

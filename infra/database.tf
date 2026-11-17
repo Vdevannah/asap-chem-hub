@@ -7,12 +7,13 @@ data "aws_rds_engine_version" "mysql" {
   latest  = true
 }
 
-# Fails at plan time if db.t4g.micro + gp3 is not orderable for this engine version
+# Fails at plan time if db.t4g.micro + gp2 is not orderable for this engine version
+# (keep storage_type in step with aws_db_instance.db)
 data "aws_rds_orderable_db_instance" "mysql" {
   engine         = data.aws_rds_engine_version.mysql.engine
   engine_version = data.aws_rds_engine_version.mysql.version_actual
   instance_class = var.db_instance_class
-  storage_type   = "gp3"
+  storage_type   = "gp2"
 }
 
 resource "aws_db_subnet_group" "db" {
@@ -46,7 +47,8 @@ resource "aws_db_instance" "db" {
   instance_class = var.db_instance_class
 
   allocated_storage = var.db_allocated_storage_gb
-  storage_type      = "gp3"
+  # gp2 is the storage type named in AWS free tier docs; switch to gp3 after upgrading if wanted.
+  storage_type      = "gp2"
   storage_encrypted = true
   # no max_allocated_storage: storage autoscaling stays off (no surprise growth)
 
@@ -62,7 +64,9 @@ resource "aws_db_instance" "db" {
   multi_az               = false
   ca_cert_identifier     = "rds-ca-rsa2048-g1"
 
-  backup_retention_period    = 7
+  # Free plan limit, based on observed behaviour (7 rejected, 1 accepted), not AWS docs.
+  # Raise to 7 after upgrading to a paid plan; changing between non-zero values causes no outage.
+  backup_retention_period    = 1
   copy_tags_to_snapshot      = true
   deletion_protection        = true
   skip_final_snapshot        = false

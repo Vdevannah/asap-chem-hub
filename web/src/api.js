@@ -8,7 +8,13 @@ async function get(path, params = {}) {
     if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) continue;
     url.searchParams.set(k, Array.isArray(v) ? v.join(",") : v);
   }
-  const res = await fetch(url);
+  let res = await fetch(url);
+  // 429 (Lambda throttled) and 503 are usually momentary: retry once after ~1 s plus jitter, so a
+  // burst of page loads doesn't all retry at the same instant. Other errors fail straight away.
+  if (res.status === 429 || res.status === 503) {
+    await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 500));
+    res = await fetch(url);
+  }
   if (!res.ok) throw new Error(`The server answered ${res.status} for ${path}`);
   return res.json();
 }

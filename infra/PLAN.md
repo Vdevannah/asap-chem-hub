@@ -130,7 +130,7 @@ gets no public IP and only these two groups can reach it.
 | 1 | `aws_security_group` × 3 + rules | as above |
 | 2 | `aws_db_subnet_group` | 2+ default subnets in different AZs |
 | 3 | `aws_db_parameter_group` (mysql8.4) | `require_secure_transport=1`, `character_set_server=utf8mb4`, `collation_server=utf8mb4_unicode_ci` (same as local) |
-| 4 | `aws_db_instance` | MySQL 8.4, db.t4g.micro, single-AZ, 20 GB gp3, storage autoscaling off, encrypted, `publicly_accessible=false`, `iam_database_authentication_enabled=true`, `manage_master_user_password=true`, backups 7 days, `deletion_protection=true`, final snapshot on delete, Performance Insights off, Enhanced Monitoring off |
+| 4 | `aws_db_instance` | MySQL 8.4, db.t4g.micro, single-AZ, 20 GB gp2 (free tier storage type; gp3 after upgrading if wanted), storage autoscaling off, encrypted, `publicly_accessible=false`, `iam_database_authentication_enabled=true`, `manage_master_user_password=true`, backups 1 day (Free plan limit, observed: 7 rejected, 1 accepted, not from AWS docs; raise to 7 after upgrading, no outage between non-zero values), `deletion_protection=true`, final snapshot on delete, Performance Insights off, Enhanced Monitoring off |
 | 5 | Secrets Manager secret (created **by RDS**) | master password; not in state |
 | 6 | `aws_s3_bucket` site + public-access block + bucket policy | private; policy allows only this CloudFront distribution (OAC) |
 | 7 | `aws_s3_bucket` artifacts + lifecycle | Lambda zip, one-off DB export (`migration/`, deleted after 3 days) |
@@ -166,8 +166,8 @@ tier), most of this is covered at first.
 | Resource | Basis | $/month | Costs when idle? |
 |---|---|---|---|
 | **RDS db.t4g.micro**, single-AZ | $0.016/h × 730 h | **≈ 11.70** | **Yes**, runs 24/7 |
-| **RDS gp3 storage** 20 GB | $0.115/GB-month | **≈ 2.30** | **Yes** |
-| RDS automated backups (7 days) | free up to 20 GB (= DB size) | ≈ 0 | snapshots kept after deletion cost $0.095/GB-month |
+| **RDS gp2 storage** 20 GB | $0.115/GB-month | **≈ 2.30** | **Yes** |
+| RDS automated backups (1 day, Free plan limit; 7 after upgrading) | free up to 20 GB (= DB size) | ≈ 0 | snapshots kept after deletion cost $0.095/GB-month |
 | **Secrets Manager** (RDS master secret) | $0.40/secret | **0.40** | **Yes** |
 | Fargate ARM 0.25 vCPU / 0.5 GB | ≈ $0.0099/h; ≈ 55 task-hours (720 hourly runs × ~4 min, 30 patent runs × ~10 min, 30 cleanups) | ≈ 0.55 | no |
 | Public IPv4 for Fargate tasks | $0.005/h while a task runs (~55 h) | ≈ 0.30 | no |

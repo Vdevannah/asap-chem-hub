@@ -52,9 +52,9 @@ variable "lambda_runtime" {
 }
 
 variable "lambda_reserved_concurrency" {
-  description = "Caps simultaneous API instances so they cannot exhaust MySQL connections. Set to -1 (no reservation) if the account's total Lambda concurrency is only 10."
+  description = "Caps simultaneous API instances (one reused MySQL connection each) so they cannot exhaust the db.t4g.micro's MySQL connections or run up cost. The account's Lambda concurrency is 400; AWS keeps at least 100 unreserved. Set to -1 for no reservation."
   type        = number
-  default     = 10
+  default     = 25
 }
 
 variable "api_cache_seconds" {
