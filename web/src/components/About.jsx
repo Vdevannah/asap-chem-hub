@@ -39,7 +39,7 @@ const SECTIONS = [
 
 const FAQ = [
   ["Why do some articles have no figure?",
-   "Some publishers' feeds don't include a graphical abstract, and some add it a few days after the article appears. Those cards say \"Figure expected in a few days\" and pick up the figure automatically once it is available."],
+   "Some publishers' feeds don't include a graphical abstract, and some add it a few days after the article appears. Those cards say \"Graphical abstract coming\" and pick up the figure automatically once it is available."],
   ["Can I use the patent tab for freedom-to-operate?",
    "No. The patent tab is for awareness only: it lists new WO applications matched by keywords and classification codes, and it can miss relevant ones. It is not a freedom-to-operate or patentability search; for that, consult a patent professional."],
   ["Do I need an account?",

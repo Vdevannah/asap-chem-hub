@@ -14,4 +14,5 @@
 !scripts/import_db.py
 !scripts/refresh_titles.py
 !scripts/refresh_abstracts.py
+!scripts/migrate_feed_validators.py
 !jobs/run_job.sh

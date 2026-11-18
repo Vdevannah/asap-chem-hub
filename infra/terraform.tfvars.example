@@ -3,6 +3,5 @@
 # schedules_enabled  = true            # after the data migration is verified
 # lambda_reserved_concurrency = -1     # if the account's total Lambda concurrency is only 10
 # Custom domain later:
-# domain_name         = "asapchemhub.org"
-# acm_certificate_arn = "arn:aws:acm:us-east-1:<account>:certificate/<id>"
-# route53_zone_id     = "Z0123456789ABCDEFGHIJ"
+# domain_name = "asapchemhub.com"     # also serves www.asapchemhub.com
+# dns_mode    = "route53"             # or "external" (DNS records added by hand at the registrar)

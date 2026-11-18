@@ -606,18 +606,37 @@ def is_research(name, e) -> bool:
     return True
 
 
-def fetch_journal(name, publisher, url, session):
-    """Returns (articles, error, categories seen in the feed)."""
+def fetch_journal(name, publisher, url, session, validators=None):
+    """Returns (articles, error, categories seen in the feed).
+
+    validators (optional, RSS feeds only): a dict with the feed's stored "etag" and "last_modified"
+    (either may be None). They are sent as If-None-Match / If-Modified-Since, and the dict is updated
+    in place: "not_modified" is True when the publisher answered 304 (then the result is ([], None, [])
+    - nothing to process), otherwise "etag" / "last_modified" hold the new response's values."""
+    if validators is not None:
+        validators["not_modified"] = False
     if publisher == "ChemRxiv":
         return fetch_chemrxiv(name, publisher, url, session)
     if url.startswith("crossref:"):
         return fetch_crossref(name, publisher, url[len("crossref:"):] + ",type:journal-article", session,
                               days=30)   # the whole 30-day window, so nothing is missed
+    headers = {}
+    if validators:
+        if validators.get("etag"):
+            headers["If-None-Match"] = validators["etag"]
+        if validators.get("last_modified"):
+            headers["If-Modified-Since"] = validators["last_modified"]
     try:
-        r = session.get(url, timeout=30)
+        r = session.get(url, timeout=30, headers=headers)
         r.raise_for_status()
     except requests.RequestException as e:
         return None, f"FAILED to fetch feed: {e}", []
+    if validators is not None:
+        if r.status_code == 304:
+            validators["not_modified"] = True
+            return [], None, []
+        validators["etag"] = r.headers.get("ETag")
+        validators["last_modified"] = r.headers.get("Last-Modified")
 
     feed = feedparser.parse(r.content)
     if not feed.entries:

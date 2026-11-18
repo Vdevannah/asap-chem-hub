@@ -82,21 +82,25 @@ variable "ssm_parameter_names" {
   default     = ["EPO_KEY", "EPO_SECRET", "SPRINGER_META_KEY", "SPRINGER_OA_KEY", "CROSSREF_MAILTO"]
 }
 
+variable "articles_schedule" {
+  description = "EventBridge Scheduler expression (UTC) for the articles job. Hourly at :05 by default; \"cron(5/15 * * * ? *)\" = every 15 minutes (:05, :20, :35, :50). The Crossref backup stays at most every 6 h (ingest.CROSSREF_BACKUP_HOURS) whatever this is."
+  type        = string
+  default     = "cron(5 * * * ? *)"
+}
+
 # --- optional custom domain (later) ---
 variable "domain_name" {
-  description = "Custom domain for the site, e.g. asapchemhub.org. Empty = the *.cloudfront.net address."
+  description = "Custom domain for the site (apex; www. is added too), e.g. asapchemhub.com. Empty = the *.cloudfront.net address."
   type        = string
   default     = ""
 }
 
-variable "acm_certificate_arn" {
-  description = "ACM certificate covering domain_name (required when domain_name is set). Must be in us-east-1 (CloudFront), even though the stack is in us-east-2."
+variable "dns_mode" {
+  description = "Where DNS for domain_name lives: \"route53\" (Terraform creates the hosted zone and all records) or \"external\" (records added by hand at the registrar). See domain.tf."
   type        = string
-  default     = ""
-}
-
-variable "route53_zone_id" {
-  description = "Route 53 hosted zone for domain_name; when set, Terraform adds the alias records. Empty = manage DNS elsewhere."
-  type        = string
-  default     = ""
+  default     = "route53"
+  validation {
+    condition     = contains(["route53", "external"], var.dns_mode)
+    error_message = "dns_mode must be \"route53\" or \"external\"."
+  }
 }

@@ -65,7 +65,7 @@ resource "aws_cloudfront_distribution" "site" {
   price_class         = "PriceClass_100"
   http_version        = "http2and3"
   is_ipv6_enabled     = true
-  aliases             = local.custom_domain ? [var.domain_name] : []
+  aliases             = local.site_names # apex + www (domain.tf)
 
   origin {
     origin_id                = "site"
@@ -115,31 +115,11 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
-  # *.cloudfront.net certificate now; a custom domain later just needs domain_name + acm_certificate_arn
+  # *.cloudfront.net certificate, or the issued ACM certificate when domain_name is set (domain.tf)
   viewer_certificate {
     cloudfront_default_certificate = !local.custom_domain
-    acm_certificate_arn            = local.custom_domain ? var.acm_certificate_arn : null
+    acm_certificate_arn            = local.custom_domain ? aws_acm_certificate_validation.site[0].certificate_arn : null
     ssl_support_method             = local.custom_domain ? "sni-only" : null
     minimum_protocol_version       = local.custom_domain ? "TLSv1.2_2021" : "TLSv1"
-  }
-
-  lifecycle {
-    precondition {
-      condition     = !local.custom_domain || var.acm_certificate_arn != ""
-      error_message = "domain_name needs acm_certificate_arn (an ACM certificate in us-east-1)."
-    }
-  }
-}
-
-# Optional DNS for the custom domain (only when route53_zone_id is set)
-resource "aws_route53_record" "site" {
-  for_each = local.custom_domain && var.route53_zone_id != "" ? toset(["A", "AAAA"]) : toset([])
-  zone_id  = var.route53_zone_id
-  name     = var.domain_name
-  type     = each.value
-  alias {
-    name                   = aws_cloudfront_distribution.site.domain_name
-    zone_id                = aws_cloudfront_distribution.site.hosted_zone_id
-    evaluate_target_health = false
   }
 }

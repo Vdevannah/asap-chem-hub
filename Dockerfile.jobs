@@ -19,7 +19,8 @@ RUN chmod 755 /app/certs && chmod 644 /app/certs/global-bundle.pem
 
 # Only the pipeline code - never .env, data or local tools (see .dockerignore)
 COPY db_connect.py load_poc.py topics.py poc_feeds.py epo.py springer.py ingest.py retag_topics.py ./
-COPY scripts/db_transfer.py scripts/import_db.py scripts/refresh_titles.py scripts/refresh_abstracts.py scripts/
+COPY scripts/db_transfer.py scripts/import_db.py scripts/refresh_titles.py scripts/refresh_abstracts.py \
+     scripts/migrate_feed_validators.py scripts/
 COPY --chmod=755 jobs/run_job.sh /app/run_job.sh
 
 RUN useradd --create-home --uid 10001 app && mkdir -p /app/logs && chown app /app/logs

@@ -71,7 +71,7 @@ export function ArticleCard({ a, isNew = false, layout = "grid", onZoom }) {
           <span className="no-figure">
             <span className="no-figure-journal">{a.journal}</span>
             <span className="no-figure-note">
-              {a.figure_status === "pending" ? "Figure expected in a few days" : "No graphical abstract"}
+              {a.figure_status === "pending" ? "Graphical abstract coming" : "No graphical abstract"}
             </span>
           </span>
         </div>

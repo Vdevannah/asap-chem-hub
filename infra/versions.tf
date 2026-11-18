@@ -22,8 +22,8 @@ provider "aws" {
 }
 
 # us-east-1 is needed only for global-service resources that AWS keeps there: an ACM certificate
-# for CloudFront (custom domain, later). The account's managed SCP allows acm:* and cloudfront:* in
-# us-east-1 while denying most regional services there. Nothing uses this alias yet.
+# for CloudFront (custom domain, domain.tf). The account's managed SCP allows acm:*, route53:* and
+# cloudfront:* in us-east-1 while denying most regional services there.
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"

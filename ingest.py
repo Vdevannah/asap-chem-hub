@@ -8,7 +8,9 @@ Keeps the database fresh. Four jobs:
             tag topics. RSS items whose DOI we already have (e.g. from the Crossref
             backup) fill that article's empty abstract/figure/authors.
             Then, at most every 6 hours, a Crossref backup for ACS: articles from the
-            last 7 days (by ISSN) that RSS missed, title-only, no figure. -> hourly
+            last 7 days (by ISSN) that RSS missed, title-only, no figure yet ('pending' when
+            published in the last 2 days, then 'none'). Feeds are fetched with conditional
+            requests (ETag / Last-Modified); a 304 counts as "no change". -> hourly
   figures   re-check open-access Nature articles marked 'pending' and add
             Figure 1 when Springer has indexed the full text;
             give up after 14 days.                               -> daily
@@ -35,7 +37,7 @@ import os
 import sys
 import time
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
@@ -54,6 +56,11 @@ PATENT_LOOKBACK_DAYS = 28   # EPO loads WO batches late, so look back two weeks
 PATENT_OFFICE = "WO"
 CROSSREF_BACKUP_HOURS = 6   # ACS Crossref backup: at most once per this many hours
 CROSSREF_BACKUP_DAYS = 7    # ... looking back this many days (by publication date)
+ACS_PENDING_DAYS = 2        # Crossref-backup ACS articles published within this many days (UTC dates) are
+                            # 'pending': the ACS RSS feed (rebuilt about once a day) should bring their
+                            # graphical abstract; after that they become 'none'
+FULL_FETCH_HOURS = 24       # conditional feed requests (ETag / Last-Modified), but download each feed in
+                            # full at least this often, in case a publisher wrongly keeps answering 304
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +87,9 @@ def finish_run(db, run_id, status, seen=0, new=0, deleted=0, notes=None):
 def job_articles(db, session, only=None):
     cur = db.cursor()
     run_id = start_run(db, "articles")
-    cur.execute("SELECT journal_id, name, publisher, feed_url FROM journals WHERE is_active")
+    cur.execute("""SELECT journal_id, name, publisher, feed_url, feed_etag, feed_last_modified,
+                          feed_fetched_at IS NOT NULL AND feed_fetched_at > NOW() - INTERVAL %s HOUR
+                     FROM journals WHERE is_active""", (FULL_FETCH_HOURS,))
     journals = [j for j in cur.fetchall() if not only or j[2].lower() in only]
     cur.execute("SELECT name, topic_id FROM article_topics")
     topic_ids = dict(cur.fetchall())
@@ -97,12 +106,23 @@ def job_articles(db, session, only=None):
     cutoff = to_date(time.strftime("%Y-%m-%d", time.gmtime(time.time() - ARTICLE_DAYS * 86400)))
 
     seen = new = filled = 0
-    failed, stale = [], []
+    failed, stale, unchanged = [], [], []
     windows = []                              # per feed: "name count@oldest", to spot feeds whose window
                                               # is shorter than the polling interval
-    for journal_id, name, publisher, url in journals:
+    for journal_id, name, publisher, url, etag, last_modified, recent_full_fetch in journals:
         print(f"  {name:28s}", end=" ", flush=True)
-        items, err, _ = feeds.fetch_journal(name, publisher, url, session)
+        # conditional request, unless the last full download is over FULL_FETCH_HOURS old
+        validators = ({"etag": etag, "last_modified": last_modified} if recent_full_fetch
+                      else {"etag": None, "last_modified": None})
+        items, err, _ = feeds.fetch_journal(name, publisher, url, session, validators)
+        if validators["not_modified"]:            # 304: same feed as last time, nothing to do
+            unchanged.append(name)
+            windows.append(f"{name} 304")
+            cur.execute("UPDATE journals SET last_fetched_at = NOW() WHERE journal_id = %s", (journal_id,))
+            db.commit()
+            print("   not modified (304)")
+            time.sleep(1)
+            continue
         if err:
             failed.append(f"{name}: {err[:120]}")
             cur.execute("UPDATE journals SET last_fetched_at = NOW(), last_error = %s WHERE journal_id = %s",
@@ -169,23 +189,45 @@ def job_articles(db, session, only=None):
             added += 1
 
         new += added
-        cur.execute("UPDATE journals SET last_fetched_at = NOW(), last_error = %s WHERE journal_id = %s",
-                    (warning, journal_id))
+        # the feed's validators are saved in the same commit as its articles, so a run that dies
+        # half-way never leaves an ETag for content that was not processed
+        cur.execute("""UPDATE journals SET last_fetched_at = NOW(), last_error = %s, feed_etag = %s,
+                              feed_last_modified = %s, feed_fetched_at = NOW()
+                        WHERE journal_id = %s""",
+                    (warning, (validators.get("etag") or None) and validators["etag"][:255],
+                     (validators.get("last_modified") or None) and validators["last_modified"][:64],
+                     journal_id))
         db.commit()                           # save each journal as we go
         print(f"{len(items):4d} in feed, {added:3d} new" + (f"   <- {warning}" if warning else ""))
         time.sleep(1)                         # be polite to publishers
 
+    expired = expire_acs_pending(db)
+
     status = "failed" if journals and len(failed) == len(journals) else ("partial" if failed or stale else "success")
     notes = "; ".join(failed + [f"stale: {x}" for x in stale] + [f"filled: {filled}"] +
-                      ["windows: " + " | ".join(windows)])
+                      [f"not modified (304): {len(unchanged)}" + (f" ({', '.join(unchanged)})" if unchanged else "")] +
+                      [f"acs pending -> none: {expired}"] + ["windows: " + " | ".join(windows)])
     finish_run(db, run_id, status, seen, new, notes=notes)
-    print(f"articles: {new} new of {seen} seen, {filled} filled in, {len(failed)} feed(s) failed, "
-          f"{len(stale)} stale -> {status}")
+    print(f"articles: {new} new of {seen} seen, {filled} filled in, {len(unchanged)} not modified (304), "
+          f"{len(failed)} feed(s) failed, {len(stale)} stale, {expired} ACS pending -> none -> {status}")
     if stale:
         print("  stale feeds (check their URL): " + ", ".join(stale))
     if not only or "acs" in only:
         new += job_crossref_backup(db, session, topic_ids, cutoff)
     return new
+
+
+def expire_acs_pending(db):
+    """ACS articles still 'pending' (no graphical abstract from RSS) once their publication date is more
+    than ACS_PENDING_DAYS days back become 'none'. Nature's 'pending' (open-access Figure 1) is left to
+    job_figures."""
+    cur = db.cursor()
+    cur.execute("""UPDATE articles a JOIN journals j USING (journal_id)
+                      SET a.figure_status = 'none', a.figure_checked_at = NOW()
+                    WHERE j.publisher = 'ACS' AND a.figure_status = 'pending'
+                      AND a.published_date < UTC_DATE() - INTERVAL %s DAY""", (ACS_PENDING_DAYS,))
+    db.commit()
+    return cur.rowcount
 
 
 def fill_gaps(cur, a, have, topic_ids):
@@ -229,7 +271,9 @@ def job_crossref_backup(db, session, topic_ids, cutoff):
     ACS RSS titles carry no formatting ("CO2"), Crossref's do (CO<sub>2</sub>): for ACS papers we
     already have with a tagless title, take Crossref's formatted title when it is the same text
     (poc_feeds.upgrade_title - the same rules as scripts/refresh_titles.py). title_plain follows
-    automatically (generated column)."""
+    automatically (generated column).
+    Papers published within ACS_PENDING_DAYS are stored as figure_status 'pending' (the next ACS RSS
+    build should bring the graphical abstract); older ones as 'none'."""
     cur = db.cursor()
     cur.execute("""SELECT 1 FROM ingestion_runs
                     WHERE job = 'crossref_acs' AND status IN ('success', 'partial')
@@ -252,6 +296,8 @@ def job_crossref_backup(db, session, topic_ids, cutoff):
 
     seen = new = upgraded_total = 0
     notes, failed = [], []
+    today = datetime.now(timezone.utc).date()
+    pending_from = today - timedelta(days=ACS_PENDING_DAYS)
     for journal_id, name in journals:
         issns = feeds.ACS_ISSNS.get(name)
         if not issns:
@@ -276,13 +322,14 @@ def job_crossref_backup(db, session, topic_ids, cutoff):
             published = to_date(a["date"])
             # a future date is a bad deposit (seen: JACS 'published-online' 2026-12-31 in November);
             # skip it - RSS brings the paper with its real date
-            if a["doi"].lower() in known or not a["date"] or not cutoff <= published <= date.today():
+            if a["doi"].lower() in known or not a["date"] or not cutoff <= published <= today:
                 continue
             cur.execute(
                 """INSERT IGNORE INTO articles
                      (doi, journal_id, title, authors, abstract, article_url, published_date, figure_status)
-                   VALUES (%s, %s, %s, %s, NULL, %s, %s, 'none')""",
-                (a["doi"], journal_id, a["title"][:1000], a["authors"] or None, a["link"], published))
+                   VALUES (%s, %s, %s, %s, NULL, %s, %s, %s)""",
+                (a["doi"], journal_id, a["title"][:1000], a["authors"] or None, a["link"], published,
+                 "pending" if published >= pending_from else "none"))
             known.add(a["doi"].lower())
             if cur.rowcount == 0:
                 continue
@@ -341,11 +388,12 @@ def job_figures(db, session):
     if unchecked:
         print(f"figures: open-access check on {len(unchecked)} older Nature articles, {marked} marked pending")
 
+    # Springer Nature only: ACS 'pending' rows wait for the ACS RSS feed (expire_acs_pending)
     cur.execute(
-        """SELECT article_id, doi, first_seen_at < NOW() - INTERVAL %s DAY AS too_old
-             FROM articles
-            WHERE figure_status = 'pending'
-              AND (figure_checked_at IS NULL OR figure_checked_at < NOW() - INTERVAL %s HOUR)""",
+        """SELECT a.article_id, a.doi, a.first_seen_at < NOW() - INTERVAL %s DAY AS too_old
+             FROM articles a JOIN journals j USING (journal_id)
+            WHERE j.publisher = 'Springer Nature' AND a.figure_status = 'pending'
+              AND (a.figure_checked_at IS NULL OR a.figure_checked_at < NOW() - INTERVAL %s HOUR)""",
         (FIGURE_RETRY_DAYS, FIGURE_RETRY_HOURS))
     pending = cur.fetchall()
     found = given_up = 0

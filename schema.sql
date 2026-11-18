@@ -28,7 +28,11 @@ CREATE TABLE journals (
     default_on       BOOLEAN      NOT NULL DEFAULT TRUE,   -- switched on for new visitors
     is_active        BOOLEAN      NOT NULL DEFAULT TRUE,   -- FALSE = stop fetching, keep history
     last_fetched_at  DATETIME     NULL,
-    last_error       VARCHAR(500) NULL                    -- last fetch problem, for monitoring
+    last_error       VARCHAR(500) NULL,                   -- last fetch problem, for monitoring
+    -- conditional requests (scripts/migrate_feed_validators.py): validators of the last full download
+    feed_etag          VARCHAR(255) NULL,                 -- sent back as If-None-Match
+    feed_last_modified VARCHAR(64)  NULL,                 -- sent back as If-Modified-Since
+    feed_fetched_at    DATETIME     NULL                  -- last 200 response (a full download)
 );
 
 CREATE TABLE articles (

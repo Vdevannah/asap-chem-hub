@@ -56,9 +56,12 @@ resource "aws_iam_role_policy" "scheduler" {
 locals {
   # same commands as scripts/run_articles.sh (jobs/run_job.sh)
   schedules = {
-    articles = { expression = "cron(5 * * * ? *)", description = "Articles + figures, hourly at :05 UTC" }
-    patents  = { expression = "cron(0 5 * * ? *)", description = "WO patents from EPO, daily 05:00 UTC" }
-    cleanup  = { expression = "cron(30 5 * * ? *)", description = "Delete articles > 30 days, patents > 90 days, daily 05:30 UTC" }
+    articles = {
+      expression  = var.articles_schedule
+      description = var.articles_schedule == "cron(5 * * * ? *)" ? "Articles + figures, hourly at :05 UTC" : "Articles + figures, ${var.articles_schedule} UTC (Crossref backup still at most every 6 h)"
+    }
+    patents = { expression = "cron(0 5 * * ? *)", description = "WO patents from EPO, daily 05:00 UTC" }
+    cleanup = { expression = "cron(30 5 * * ? *)", description = "Delete articles > 30 days, patents > 90 days, daily 05:30 UTC" }
   }
 }
 
