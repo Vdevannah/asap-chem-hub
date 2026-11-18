@@ -15,6 +15,8 @@ Both are filtered by research topic. Owner: Vijayarajan Devannah (GitHub: Vdevan
 - The patent section is for awareness only, not freedom-to-operate.
 - Keep articles and patents independent: separate tables, jobs and endpoints; they share only topic names.
 - Make small, focused changes. Explain what you changed. Don't commit or push unless asked.
+- Do not add Co-Authored-By lines or any other Claude attribution to commit messages or pull request
+  descriptions.
 - AWS safety: never run `terraform apply`, `terraform destroy`, or any `aws` command that creates, changes
   or deletes resources (create, put, update, delete, run-task, start, stop, invoke). You may run
   `terraform init`, `validate`, `fmt` and `plan`, and read-only `aws` commands (describe, list, get).
