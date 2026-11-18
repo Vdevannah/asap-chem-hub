@@ -77,6 +77,19 @@ JOURNALS = [
     ("ChemCatChem",                     "Wiley",           WILEY.format(code="18673899")),
     # --- RSC --- feeds.rsc.org froze in June 2026 and the new RSS lists only ~5 items,
     #             so RSC comes from Crossref by journal ISSN (no figures, full coverage)
+    #   The old http://feeds.rsc.org/rss/<code> URLs now redirect to RSC's new official feeds
+    #   (checked 18 Nov 2026; RSC's feed list page answers 403 to scripts):
+    #     Chemical Science    sc  https://pubs.rsc.org/rss/site_1000029/advanceAccess_1000016.xml
+    #     Chem. Commun.       cc  https://pubs.rsc.org/rss/site_1000027/advanceAccess_1000015.xml
+    #     Org. Biomol. Chem.  ob  https://pubs.rsc.org/rss/site_1000163/advanceAccess_1000083.xml
+    #     Org. Chem. Front.   qo  https://pubs.rsc.org/rss/site_1000165/advanceAccess_1000084.xml
+    #     RSC Med. Chem.      md  https://pubs.rsc.org/rss/site_1000233/advanceAccess_1000104.xml
+    #     RSC Chem. Biol.     cb  https://pubs.rsc.org/rss/site_1000225/advanceAccess_1000102.xml
+    #     Chem. Soc. Rev.     cs  https://pubs.rsc.org/rss/site_1000031/advanceAccess_1000017.xml
+    #     Nat. Prod. Rep.     np  https://pubs.rsc.org/rss/site_1000159/advanceAccess_1000081.xml
+    #   They hold 2-8 items (1-5 days) with title, link, DOI (prism:doi) and abstract, but NO images
+    #   (no <img>, enclosure or media: tags), so they cannot supply graphical abstracts and Crossref
+    #   already has the abstracts. RSC cards show the text panel instead of a figure (web Cards.jsx).
     ("Chemical Science",                "RSC",             "crossref:issn:2041-6539"),
     ("Chem. Commun.",                   "RSC",             "crossref:issn:1364-548X"),
     ("Org. Biomol. Chem.",              "RSC",             "crossref:issn:1477-0539"),
