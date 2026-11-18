@@ -1,10 +1,23 @@
 # ASAP Chem Hub
 
+**Live site:** [https://asapchemhub.com](https://asapchemhub.com)
+
 **ASAP articles and new patents in one place.**
 
-ASAP Chem Hub is a free website (in development) where chemists can scan the newest journal articles and newly published patents in one place, with graphical abstracts and research-topic filters.
+ASAP Chem Hub is a free website where chemists can scan the newest journal articles and newly published patents in one place, with graphical abstracts and research-topic filters.
 
-> **Status:** backend complete. Ingestion and API work for both articles (37 journals) and patents (WO, EPO). Website (React) is next, then deployment to AWS.
+## Screenshots
+
+**Articles: list view, filtered by journal and topic**
+![ASAP Chem Hub articles list view](docs/screenshots/asap-chem-hub-articles.png)
+
+**Articles: grid view with graphical abstracts**
+![ASAP Chem Hub articles grid view](docs/screenshots/asap-chem-hub-grid.png)
+
+**New WO patents, grouped by publication date**
+![ASAP Chem Hub new patents](docs/screenshots/asap-chem-hub-patents.png)
+
+> **Status:** live at [asapchemhub.com](https://asapchemhub.com). Articles update hourly and patents daily, running on AWS (Lambda, RDS, ECS Fargate, EventBridge, CloudFront) with all infrastructure defined in Terraform.
 
 ---
 
@@ -159,12 +172,12 @@ uvicorn api.main:app --reload
 - [x] Scheduled ingestion jobs with run logging and stale-feed warnings
 - [x] FastAPI backend for articles
 - [x] EPO OPS patents: five WO searches, 14 topics, 90-day window, `/patents` API
-- [ ] React website: ASAP Articles and New Patents tabs
-- [ ] Deploy to AWS (RDS MySQL, ECS Fargate scheduled ingestion, Lambda + API Gateway, S3 + CloudFront)
+- [x] React website: ASAP Articles and New Patents tabs
+- [x] Deploy to AWS (RDS MySQL, ECS Fargate scheduled ingestion, Lambda Function URL behind CloudFront, S3 + CloudFront)
 
 ## Tech stack
 
-Python · feedparser · requests · MySQL 8.4 · Docker · FastAPI · React + Vite (next) · AWS (planned)
+Python · feedparser · requests · MySQL 8.4 · Docker · FastAPI · React + Vite · AWS
 
 ## Author
 
